@@ -5,14 +5,32 @@ from api.v1.api import api_router
 from core.config import settings
 from db.base import Base
 from db.session import engine
+from sqladmin import Admin, ModelView
+from models.user import User
 
-# Note: We are keeping the DB configuration but not creating tables yet as per user request
-# Base.metadata.create_all(bind=engine)
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+# Initialize DB with mock data
+from mock.seeder import seed_db
+from db.session import SessionLocal
+with SessionLocal() as db:
+    seed_db(db)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+# Admin integration
+class UserAdmin(ModelView, model=User):
+    column_list = [User.id, User.full_name, User.email, User.role, User.is_active]
+    column_searchable_list = [User.full_name, User.email]
+    column_sortable_list = [User.id]
+    icon = "fa-solid fa-user"
+
+admin = Admin(app, engine)
+admin.add_view(UserAdmin)
 
 # Set all CORS enabled origins
 app.add_middleware(
