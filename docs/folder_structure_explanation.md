@@ -11,6 +11,11 @@ This document provides a clear overview of the backend codebase, its modular arc
 - **Spring Boot Equivalent**: `@RestController`
 - **Responsibility**: Handles HTTP requests (Auth, Cases, Uploads). Manages routing and response formatting.
 
+**api/deps.py**
+- **What It Means**: Dependency Provider
+- **Spring Boot Equivalent**: `@Autowired` / `@Bean`
+- **Responsibility**: Provides shared dependencies like database sessions (`get_db`) and authentication guards. Ensures database connections are automatically opened and closed per request.
+
 **core**
 - **What It Means**: Global Constants & Config
 - **Spring Boot Equivalent**: `@Configuration`
