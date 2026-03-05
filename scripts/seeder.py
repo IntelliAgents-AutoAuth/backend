@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from models.user import User
-from .data import MOCK_USERS
+from mock_data.data import MOCK_USERS
 
 def seed_db(db: Session) -> None:
     """

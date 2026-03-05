@@ -12,7 +12,7 @@ from models.user import User
 Base.metadata.create_all(bind=engine)
 
 # Initialize DB with mock data
-from mock.seeder import seed_db
+from scripts.seeder import seed_db
 from db.session import SessionLocal
 with SessionLocal() as db:
     seed_db(db)
