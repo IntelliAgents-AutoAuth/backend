@@ -27,6 +27,9 @@ class UserAdmin(ModelView, model=User):
     column_list = [User.id, User.full_name, User.email, User.role, User.is_active]
     column_searchable_list = [User.full_name, User.email]
     column_sortable_list = [User.id]
+    form_excluded_columns = [User.hashed_password]
+    can_create = False
+    can_edit = False
     icon = "fa-solid fa-user"
 
 admin = Admin(app, engine)
