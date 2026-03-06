@@ -4,12 +4,13 @@ sys.path.insert(0, ".")
 from db.session import engine
 from sqlalchemy import text, inspect
 
-# Drop old tables (both possible names)
+# Drop old tables (all possible names)
 with engine.connect() as conn:
     conn.execute(text('DROP TABLE IF EXISTS "case"'))
     conn.execute(text('DROP TABLE IF EXISTS "cases"'))
+    conn.execute(text('DROP TABLE IF EXISTS "ehrs"'))
     conn.commit()
-    print("Dropped old case/cases tables")
+    print("Dropped old case/cases/ehrs tables")
 
 # Recreate all tables from the current models
 from db.base import Base

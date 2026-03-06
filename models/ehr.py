@@ -1,6 +1,6 @@
 """
-Case Table Model
-Location: backend/models/case.py
+EHR Table Model
+Location: backend/models/ehr.py
 """
 
 import json
@@ -9,8 +9,8 @@ from sqlalchemy import Column, String, Text, DateTime
 from db.base_class import Base
 
 
-class Case(Base):
-    __tablename__ = "cases"
+class EHR(Base):
+    __tablename__ = "ehrs"
 
     # ── PA Case Tracking ──────────────────────
     case_id             = Column(String,   primary_key=True)        # PA-YYYYMMDD-XXXX

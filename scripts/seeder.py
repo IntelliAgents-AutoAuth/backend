@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from models.user import User
-from models.case import Case
+from models.ehr import EHR
 from mock_data.data import MOCK_USERS
 from mock_data.ehrData import MOCK_EHR_CASES
 from core.security import get_password_hash
@@ -26,9 +26,9 @@ def seed_db(db: Session) -> None:
 
     # Seed cases from EHR data
     for case_data in MOCK_EHR_CASES:
-        db_case = db.query(Case).filter(Case.case_id == case_data["case_id"]).first()
+        db_case = db.query(EHR).filter(EHR.case_id == case_data["case_id"]).first()
         if not db_case:
-            db_obj = Case(**case_data)
+            db_obj = EHR(**case_data)
             db.add(db_obj)
         else:
             # Update existing case with new data

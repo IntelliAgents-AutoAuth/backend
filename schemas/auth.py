@@ -18,8 +18,8 @@ class Token(BaseModel):
     token_type: str = "bearer"
     user: Optional[UserInfo] = None
 
-class Case(BaseModel):
-    """Schema for a case."""
+class EHR(BaseModel):
+    """Schema for an EHR."""
     case_id: str
     status: str
     priority: str
