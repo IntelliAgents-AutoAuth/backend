@@ -1,6 +1,6 @@
 """
 Mock EHR (Electronic Health Record) data for seeding the cases table.
-Each entry maps to the Case model in models/case.py.
+Each entry maps to the EHR model in models/ehr.py.
 Updated with more realistic insurance companies, member IDs, and plans to support eligibility checks.
 """
 
