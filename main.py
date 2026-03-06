@@ -7,6 +7,7 @@ from db.base import Base
 from db.session import engine
 from sqladmin import Admin, ModelView
 from models.user import User
+from models.case import Case
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -32,8 +33,15 @@ class UserAdmin(ModelView, model=User):
     can_edit = False
     icon = "fa-solid fa-user"
 
+class CaseAdmin(ModelView, model=Case):
+    column_list = [Case.case_id, Case.patient_name, Case.procedure_name, Case.status, Case.insurance_company, Case.priority, Case.created_at]
+    column_searchable_list = [Case.patient_name, Case.procedure_name, Case.case_id]
+    column_sortable_list = [Case.case_id, Case.created_at]
+    icon = "fa-solid fa-briefcase-medical"
+
 admin = Admin(app, engine)
 admin.add_view(UserAdmin)
+admin.add_view(CaseAdmin)
 
 # Set all CORS enabled origins
 app.add_middleware(
