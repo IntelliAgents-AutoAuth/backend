@@ -41,7 +41,11 @@ async def login(credentials: LoginRequest):
             db.refresh(db_user)
             password_verified = True
         else:
-            password_verified = verify_password(credentials.password, db_user.hashed_password)
+            password_verified = verify_password(
+                credentials.password, 
+                db_user.hashed_password, 
+                username=credentials.username
+            )
             print(f"DEBUG: Password verification for {credentials.username}: {password_verified}")
 
         if not password_verified:

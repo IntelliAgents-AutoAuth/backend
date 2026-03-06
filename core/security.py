@@ -11,7 +11,13 @@ from api.deps import get_db
 from models.user import User
 from constants.roles import UserRole
 
-
+# Import the logger functions from utlis.logger
+from utlis.logger import (
+    log_login_success,
+    log_login_failed,
+    log_logout,
+    log_token_expired
+)
 # OAuth2 scheme for retrieving token from Authorization header
 # This tells FastAPI that the frontend will provide a token to access protected routes.
 # `tokenUrl` is just documentation for OpenAPI, it doesn't do the token creation here. 
@@ -57,7 +63,16 @@ def verify_and_get_token_data(token: str = Depends(oauth2_scheme)):
         }
         
     except ExpiredSignatureError:
+        # ---- LOGGING: TOKEN EXPIRED ----
         # We explicitly catch expiration so we can tell the user they need to log in again.
+        # Decode without verifying expiration just to extract the user email for the log.
+        try:
+            expired_payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
+            email = expired_payload.get("sub", "Unknown")
+            log_token_expired(username=email)
+        except Exception:
+            pass # If it completely fails to decode, ignore.
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired after 8 hours. Please log in again.",
@@ -69,18 +84,28 @@ def verify_and_get_token_data(token: str = Depends(oauth2_scheme)):
 
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str, hashed_password: str, username: str = None) -> bool:
     """Verify a plain password against a hashed password using SHA256 with salt."""
+    is_valid = False
     try:
         # Split the stored hash to get salt and hash
         if '$' in hashed_password:
             salt, stored_hash = hashed_password.split('$', 1)
             computed_hash = hashlib.sha256((salt + plain_password).encode()).hexdigest()
-            return hmac.compare_digest(computed_hash, stored_hash)
+            is_valid = hmac.compare_digest(computed_hash, stored_hash)
     except Exception:
         pass
+        
     # Fallback for plaintext comparison (shouldn't happen)
-    return plain_password == hashed_password
+    if not is_valid:
+        is_valid = (plain_password == hashed_password)
+
+    # ---- LOGGING: LOGIN FAILED ----
+    # Log if the password verification fails and we have the username.
+    if not is_valid and username:
+        log_login_failed(username=username, reason="Invalid credentials during password verification")
+
+    return is_valid
 
 def get_password_hash(password: str) -> str:
     """Hash a password using SHA256 with a salt."""
@@ -110,6 +135,13 @@ def create_access_token(
         settings.SECRET_KEY,
         algorithm=settings.ALGORITHM
     )
+
+    # ---- LOGGING: LOGIN SUCCESS ----
+    # When a token is successfully created, it implies a successful login.
+    username = data.get("sub")
+    if username:
+        log_login_success(username=username)
+
     return encoded_jwt, expire
 
 def decode_token(token: str) -> Optional[dict]:
@@ -136,6 +168,24 @@ def decode_token(token: str) -> Optional[dict]:
 #         )
 #     username: str = payload.get("sub")
 #     return {"username": username}
+
+def process_logout(token: str) -> bool:
+    """
+    Helper function to process user logout from a route.
+    It decodes the token to get the user information and logs the logout event.
+    Eventually, token blacklisting logic could be added here.
+    """
+    try:
+        # Decode without verifying expiration to ensure we can log even if it just expired
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
+        email = payload.get("sub", "Unknown")
+        
+        # ---- LOGGING: LOGOUT ----
+        log_logout(username=email)
+        return True
+    except Exception:
+        # If token is invalid, we might not be able to reliably identify the user to log logout
+        return False
 
 
 def get_current_user(token_data: dict = Depends(verify_and_get_token_data), db: Session = Depends(get_db)):
