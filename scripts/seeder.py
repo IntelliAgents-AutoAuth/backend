@@ -20,4 +20,4 @@ def seed_db(db: Session) -> None:
             )
             db.add(db_obj)
     db.commit()
-    print("✓ Successfully seeded database with mock users.")
+    print("[OK] Successfully seeded database with mock users.")

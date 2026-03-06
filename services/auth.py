@@ -17,7 +17,7 @@ def get_mock_users_db():
             },
             "admin": {
                 "username": "admin",
-                "email": "admin@example.com", 
+                "email": "admin@example.com",
                 "hashed_password": get_password_hash("admin123"),
                 "is_active": True,
             }
@@ -30,16 +30,16 @@ MOCK_USERS_DB = {}
 
 class AuthenticationService:
     """Service for handling authentication operations."""
-    
+
     @staticmethod
     def authenticate_user(username: str, password: str) -> Optional[dict]:
         """
         Authenticate a user with username and password.
-        
+
         Args:
             username: The username to authenticate
             password: The plain text password
-            
+
         Returns:
             User dict if authentication successful, None if failed
         """
@@ -47,21 +47,21 @@ class AuthenticationService:
         user = users_db.get(username)
         if not user:
             return None
-        
+
         # Verify the plaintext password against the hashed password
         if not verify_password(password, user["hashed_password"]):
             return None
-        
+
         if not user["is_active"]:
             return None
-        
+
         # Return user data without password
         return {
             "username": user["username"],
             "email": user["email"],
             "is_active": user["is_active"]
         }
-    
+
     @staticmethod
     def get_user(username: str) -> Optional[dict]:
         """Get a user by username."""
@@ -74,14 +74,14 @@ class AuthenticationService:
                 "is_active": user["is_active"]
             }
         return None
-    
+
     @staticmethod
     def create_user(username: str, email: str, password: str) -> dict:
         """Create a new user (mock implementation)."""
         users_db = get_mock_users_db()
         if username in users_db:
             raise ValueError(f"User {username} already exists")
-        
+
         user = {
             "username": username,
             "email": email,

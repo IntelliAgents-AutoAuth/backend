@@ -11,15 +11,6 @@ class Token(BaseModel):
     """Response body for token."""
     access_token: str
     token_type: str = "bearer"
-    user_id: int
-    role: str
-    expires_at: datetime
-
-class User(BaseModel):
-    """User response schema."""
-    username: str
-    email: str
-    is_active: bool
 
 class Case(BaseModel):
     """Schema for a case."""

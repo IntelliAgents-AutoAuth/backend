@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from typing import List
-from api.schemas import Case
+from schemas.auth import Case
 from core.security import get_current_user
 
 router = APIRouter(prefix="/cases", tags=["cases"])
