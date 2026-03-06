@@ -39,7 +39,11 @@ async def login(credentials: LoginRequest):
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        access_token, _ = create_access_token(data={"sub": db_user.email})
+        access_token, _ = create_access_token(data={
+            "sub": db_user.email,
+            "user_id": db_user.id,
+            "role": db_user.role,
+        })
 
         return {
             "access_token": access_token,
