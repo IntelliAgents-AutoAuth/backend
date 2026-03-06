@@ -7,10 +7,16 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+class UserInfo(BaseModel):
+    name: str
+    email: str
+    role: str
+
 class Token(BaseModel):
     """Response body for token."""
     access_token: str
     token_type: str = "bearer"
+    user: Optional[UserInfo] = None
 
 class Case(BaseModel):
     """Schema for a case."""
