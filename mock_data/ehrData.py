@@ -5,12 +5,13 @@ Updated with more realistic insurance companies, member IDs, and plans to suppor
 """
 
 import json
+from constants.cases import CaseStatus, CasePriority, PlaceOfService
 
 MOCK_EHR_CASES = [
     {
         "case_id":             "PA-20260215-0001",
-        "status":              "SUBMITTED",
-        "priority":            "URGENT",
+        "status":              CaseStatus.SUBMITTED.value,
+        "priority":            CasePriority.URGENT.value,
         "patient_id":          "PT-100234",
         "patient_name":        "John Doe",
         "date_of_birth":       "1985-06-12",
@@ -25,7 +26,7 @@ MOCK_EHR_CASES = [
         "cpt_code":            "27447",
         "procedure_name":      "Total Knee Replacement",
         "procedure_date":      "2026-03-15",
-        "place_of_service":    "INPATIENT",
+        "place_of_service":    PlaceOfService.INPATIENT.value,
         "physician_name":      "Dr. Ramesh Kumar",
         "physician_npi":       "1234567890",
         "physician_specialty": "Orthopedic Surgery",
@@ -44,8 +45,8 @@ MOCK_EHR_CASES = [
     },
     {
         "case_id":             "PA-20260218-0002",
-        "status":              "APPROVED",
-        "priority":            "ROUTINE",
+        "status":              CaseStatus.APPROVED.value,
+        "priority":            CasePriority.ROUTINE.value,
         "patient_id":          "PT-100567",
         "patient_name":        "Jane Smith",
         "date_of_birth":       "1972-11-03",
@@ -60,7 +61,7 @@ MOCK_EHR_CASES = [
         "cpt_code":            "95251",
         "procedure_name":      "Continuous Glucose Monitoring (CGM) System",
         "procedure_date":      "2026-03-01",
-        "place_of_service":    "OFFICE",
+        "place_of_service":    PlaceOfService.OFFICE.value,
         "physician_name":      "Dr. Ramesh Kumar",
         "physician_npi":       "1234567890",
         "physician_specialty": "Endocrinology",
@@ -79,8 +80,8 @@ MOCK_EHR_CASES = [
     },
     {
         "case_id":             "PA-20260220-0003",
-        "status":              "PENDING_REVIEW",
-        "priority":            "EMERGENT",
+        "status":              CaseStatus.PENDING_REVIEW.value,
+        "priority":            CasePriority.EMERGENT.value,
         "patient_id":          "PT-100789",
         "patient_name":        "Alice Johnson",
         "date_of_birth":       "1960-03-25",
@@ -95,7 +96,7 @@ MOCK_EHR_CASES = [
         "cpt_code":            "33533",
         "procedure_name":      "Coronary Artery Bypass Graft (CABG) x3",
         "procedure_date":      "2026-03-05",
-        "place_of_service":    "INPATIENT",
+        "place_of_service":    PlaceOfService.INPATIENT.value,
         "physician_name":      "Dr. Ramesh Kumar",
         "physician_npi":       "1234567890",
         "physician_specialty": "Cardiothoracic Surgery",
@@ -115,8 +116,8 @@ MOCK_EHR_CASES = [
     },
     {
         "case_id":             "PA-20260225-0004",
-        "status":              "DRAFT",
-        "priority":            "ROUTINE",
+        "status":              CaseStatus.DRAFT.value,
+        "priority":            CasePriority.ROUTINE.value,
         "patient_id":          "PT-100901",
         "patient_name":        "Bob Williams",
         "date_of_birth":       "1990-09-17",
@@ -131,7 +132,7 @@ MOCK_EHR_CASES = [
         "cpt_code":            "72148",
         "procedure_name":      "MRI Lumbar Spine without Contrast",
         "procedure_date":      "2026-03-10",
-        "place_of_service":    "OUTPATIENT",
+        "place_of_service":    PlaceOfService.OUTPATIENT.value,
         "physician_name":      "Dr. Ramesh Kumar",
         "physician_npi":       "1234567890",
         "physician_specialty": "Orthopedic Surgery",
@@ -145,8 +146,8 @@ MOCK_EHR_CASES = [
     },
     {
         "case_id":             "PA-20260301-0005",
-        "status":              "DENIED",
-        "priority":            "ROUTINE",
+        "status":              CaseStatus.DENIED.value,
+        "priority":            CasePriority.ROUTINE.value,
         "patient_id":          "PT-101050",
         "patient_name":        "Maria Garcia",
         "date_of_birth":       "1978-12-30",
@@ -161,7 +162,7 @@ MOCK_EHR_CASES = [
         "cpt_code":            "64615",
         "procedure_name":      "Botox Injection for Chronic Migraine",
         "procedure_date":      "2026-03-20",
-        "place_of_service":    "OFFICE",
+        "place_of_service":    PlaceOfService.OFFICE.value,
         "physician_name":      "Dr. Ramesh Kumar",
         "physician_npi":       "1234567890",
         "physician_specialty": "Neurology",

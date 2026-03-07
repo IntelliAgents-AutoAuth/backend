@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, DateTime
 from db.base_class import Base
+from constants.cases import CaseStatus, CasePriority, PlaceOfService
 
 
 class EHR(Base):
@@ -14,8 +15,8 @@ class EHR(Base):
 
     # ── PA Case Tracking ──────────────────────
     case_id             = Column(String,   primary_key=True)        # PA-YYYYMMDD-XXXX
-    status              = Column(String,   nullable=False, default="DRAFT")
-    priority            = Column(String,   nullable=False, default="ROUTINE")  # ROUTINE / URGENT / EMERGENT
+    status              = Column(String,   nullable=False, default=CaseStatus.DRAFT.value)
+    priority            = Column(String,   nullable=False, default=CasePriority.ROUTINE.value)  # ROUTINE / URGENT / EMERGENT
     created_at          = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at          = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
                                            onupdate=lambda: datetime.now(timezone.utc))

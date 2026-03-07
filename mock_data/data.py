@@ -21,33 +21,3 @@ MOCK_USERS = {
     }
 }
 
-MOCK_CASES = [
-    {
-        "case_id": 1,
-        "patient_name": "John Doe",
-        "procedure": "Appendectomy",
-        "status": "active",
-        "assigned_to": "sai@example.com",
-    },
-    {
-        "case_id": 2,
-        "patient_name": "Jane Smith",
-        "procedure": "Knee Replacement",
-        "status": "closed",
-        "assigned_to": "sai@example.com",
-    },
-    {
-        "case_id": 3,
-        "patient_name": "Alice Johnson",
-        "procedure": "Hip Surgery",
-        "status": "active",
-        "assigned_to": "ramesh@example.com",
-    },
-    {
-        "case_id": 4,
-        "patient_name": "Bob Williams",
-        "procedure": "Cardiac Bypass",
-        "status": "active",
-        "assigned_to": "admin@example.com",
-    },
-]

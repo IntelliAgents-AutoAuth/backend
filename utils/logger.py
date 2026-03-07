@@ -9,22 +9,9 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from enum import Enum
+from constants.logging import LogEvent
 
 
-# ──────────────────────────────────────────────
-# Event Names — Auth & Case Creation only
-# ──────────────────────────────────────────────
-class LogEvent(str, Enum):
-    # Authentication
-    LOGIN_SUCCESS      = "login_success"
-    LOGIN_FAILED       = "login_failed"
-    LOGOUT             = "logout"
-    TOKEN_EXPIRED      = "token_expired"
-
-    # Case Creation
-    CASE_CREATED       = "case_created"
-    CASE_CREATE_FAILED = "case_create_failed"
 
 
 # ──────────────────────────────────────────────
@@ -97,31 +84,19 @@ def log_event(
 # Auth Wrappers
 # ──────────────────────────────────────────────
 def log_login_success(username: str):
-    return log_event(LogEvent.LOGIN_SUCCESS, agent_name="AuthService",
+    return log_event(LogEvent.LOGIN_SUCCESS, agent_name="AuthService Auth",
                      details={"username": username})
 
 def log_login_failed(username: str, reason: str = "Invalid credentials"):
-    return log_event(LogEvent.LOGIN_FAILED, agent_name="AuthService",
+    return log_event(LogEvent.LOGIN_FAILED, agent_name="AuthService Auth",
                      details={"username": username, "reason": reason}, level="WARNING")
 
 def log_logout(username: str):
-    return log_event(LogEvent.LOGOUT, agent_name="AuthService",
+    return log_event(LogEvent.LOGOUT, agent_name="AuthService Auth",
                      details={"username": username})
 
 def log_token_expired(username: str):
-    return log_event(LogEvent.TOKEN_EXPIRED, agent_name="AuthService",
+    return log_event(LogEvent.TOKEN_EXPIRED, agent_name="AuthService Auth",
                      details={"username": username}, level="WARNING")
 
 
-# ──────────────────────────────────────────────
-# Case Creation Wrappers
-
-
-# ──────────────────────────────────────────────
-def log_case_created(case_id: str, details: dict = None):
-    return log_event(LogEvent.CASE_CREATED, agent_name="NewCaseService",
-                     case_id=case_id, details=details)
-
-def log_case_create_failed(details: dict = None):
-    return log_event(LogEvent.CASE_CREATE_FAILED, agent_name="NewCaseService",
-                     details=details, level="ERROR")

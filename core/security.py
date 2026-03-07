@@ -11,8 +11,8 @@ from api.deps import get_db
 from models.user import User
 from constants.roles import UserRole
 
-# Import the logger functions from utlis.logger
-from utlis.logger import (
+# Import the logger functions from utils.logger
+from utils.logger import (
     log_login_success,
     log_login_failed,
     log_logout,
@@ -22,10 +22,6 @@ from utlis.logger import (
 # This tells FastAPI that the frontend will provide a token to access protected routes.
 # `tokenUrl` is just documentation for OpenAPI, it doesn't do the token creation here. 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
-
-ALGORITHM = "HS256"
-# Make sure SECRET_KEY is defined in your config.py so it matches what Hareesh uses!
-SECRET_KEY = getattr(settings, "SECRET_KEY", "YOUR_SUPER_SECRET_KEY")
 
 
 def verify_and_get_token_data(token: str = Depends(oauth2_scheme)):
@@ -46,7 +42,7 @@ def verify_and_get_token_data(token: str = Depends(oauth2_scheme)):
         # 1. jwt.decode automatically checks the 'exp' (expiration) claim on the token.
         # If the token is older than the 8 hours Hareesh set, it raises ExpiredSignatureError.
         # 2. It also checks the signature using the SECRET_KEY to ensure it wasn't tampered with.
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
@@ -67,7 +63,7 @@ def verify_and_get_token_data(token: str = Depends(oauth2_scheme)):
         # We explicitly catch expiration so we can tell the user they need to log in again.
         # Decode without verifying expiration just to extract the user email for the log.
         try:
-            expired_payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
+            expired_payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_exp": False})
             email = expired_payload.get("sub", "Unknown")
             log_token_expired(username=email)
         except Exception:
@@ -157,18 +153,6 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
-# def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-#     """Dependency to retrieve the current authenticated user from the token."""
-#     payload = decode_token(token)
-#     if not payload or "sub" not in payload:
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Could not validate credentials",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-#     username: str = payload.get("sub")
-#     return {"username": username}
-
 def process_logout(token: str) -> bool:
     """
     Helper function to process user logout from a route.
@@ -177,7 +161,7 @@ def process_logout(token: str) -> bool:
     """
     try:
         # Decode without verifying expiration to ensure we can log even if it just expired
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_exp": False})
         email = payload.get("sub", "Unknown")
         
         # ---- LOGGING: LOGOUT ----
