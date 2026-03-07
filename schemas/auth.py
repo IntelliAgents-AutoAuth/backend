@@ -20,6 +20,14 @@ class Token(BaseModel):
 
 class EHR(BaseModel):
     """Schema for an EHR."""
+class CaseCreate(BaseModel):
+    """Schema for creating a new case."""
+    patientName: str
+    cptCode: Optional[str] = 'Not Provided'
+    insuranceName: Optional[str] = 'Not Provided'
+
+class Case(BaseModel):
+    """Schema for a case."""
     case_id: str
     status: str
     priority: str
