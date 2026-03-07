@@ -5,7 +5,6 @@ from core.security import create_access_token, verify_password
 from api.deps import get_db
 from crud.crud_user import get_user_by_email
 from utils.logger import log_login_failed
-
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=Token)

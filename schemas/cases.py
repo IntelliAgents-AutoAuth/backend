@@ -17,8 +17,8 @@ class Case(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
-    insurance_company: str
-    cpt_code: str
+    insurance_company: Optional[str] = None
+    cpt_code: Optional[str] = None
     icd10_code: Optional[str] = None
     gap_result: Optional[Dict[str, Any]] = None
     uploaded_files: Optional[List[Dict[str, Any]]] = None

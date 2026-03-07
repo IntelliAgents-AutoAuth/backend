@@ -29,10 +29,10 @@ def create_case(db: Session, case_in: CaseCreate, created_by: str):
         patient_id=case_in.patient_id,
         status=CaseStatus.DRAFT.value,
         created_by=created_by,
-        insurance_company=case_in.insurance_company,
-        icd10_code=case_in.icd10_code,
-        cpt_code=case_in.cpt_code,
-        audit_log=[] # Initial empty audit log
+        insurance_company=case_in.insurance_company or "",
+        icd10_code=case_in.icd10_code or "",
+        cpt_code=case_in.cpt_code or "",
+        audit_log=[] 
     )
     db.add(db_case)
     db.commit()
