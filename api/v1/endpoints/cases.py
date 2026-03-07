@@ -11,7 +11,7 @@ from crud import crud_case
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 
-@router.post("/", response_model=CaseSchema)
+@router.post("", response_model=CaseSchema)
 async def create_new_case(
     case_in: CaseCreate,
     current_user: User = Depends(get_current_user),
@@ -21,7 +21,7 @@ async def create_new_case(
     return crud_case.create_case(db, case_in=case_in, created_by=current_user.email)
 
 
-@router.get("/", response_model=List[CaseSchema])
+@router.get("", response_model=List[CaseSchema])
 async def list_cases(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
