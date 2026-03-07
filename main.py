@@ -7,7 +7,9 @@ from db.base import Base
 from db.session import engine
 from sqladmin import Admin, ModelView
 from models.user import User
-from models.ehr import EHR
+from models.ehr_records import EHR
+from models.cases import Case
+from models.extracted_data import ExtractedData
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -33,15 +35,29 @@ class UserAdmin(ModelView, model=User):
     can_edit = False
     icon = "fa-solid fa-user"
 
+class CaseAdmin(ModelView, model=Case):
+    column_list = [Case.case_id, Case.patient_id, Case.status, Case.created_by, Case.created_at]
+    column_searchable_list = [Case.case_id, Case.patient_id]
+    column_sortable_list = [Case.created_at]
+    icon = "fa-solid fa-folder-medical"
+
 class EHRAdmin(ModelView, model=EHR):
-    column_list = [EHR.case_id, EHR.patient_name, EHR.procedure_name, EHR.status, EHR.insurance_company, EHR.priority, EHR.created_at]
-    column_searchable_list = [EHR.patient_name, EHR.procedure_name, EHR.case_id]
-    column_sortable_list = [EHR.case_id, EHR.created_at]
-    icon = "fa-solid fa-briefcase-medical"
+    column_list = [EHR.patient_id, EHR.patient_first_name, EHR.patient_last_name, EHR.insurance_company, EHR.created_at]
+    column_searchable_list = [EHR.patient_id, EHR.patient_first_name, EHR.patient_last_name]
+    column_sortable_list = [EHR.created_at]
+    icon = "fa-solid fa-hospital-user"
+
+class ExtractedDataAdmin(ModelView, model=ExtractedData):
+    column_list = [ExtractedData.case_id, ExtractedData.patient_id, ExtractedData.confidence_overall, ExtractedData.created_at]
+    column_searchable_list = [ExtractedData.case_id, ExtractedData.patient_id]
+    column_sortable_list = [ExtractedData.created_at]
+    icon = "fa-solid fa-microscope"
 
 admin = Admin(app, engine)
 admin.add_view(UserAdmin)
+admin.add_view(CaseAdmin)
 admin.add_view(EHRAdmin)
+admin.add_view(ExtractedDataAdmin)
 
 # Set all CORS enabled origins
 app.add_middleware(

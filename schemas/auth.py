@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
+from schemas.user import User
 
 class LoginRequest(BaseModel):
     """Request body for login endpoint."""
@@ -11,4 +12,5 @@ class Token(BaseModel):
     """Response body for token."""
     access_token: str
     token_type: str = "bearer"
+    user: User
 
