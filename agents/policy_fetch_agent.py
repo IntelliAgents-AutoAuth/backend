@@ -1,15 +1,41 @@
 import pdfplumber
+import pypdfium2 as pdfium
 import json
 import os
+import logging
 
-def extract_pdf(pdf_path, payer, policy_name, year):
+# ── Suppress noisy FontBBox warnings from pdfminer ──
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
+
+def extract_pdf(pdf_path, payer, policy_name, year, use_fast_mode=False):
+    """
+    Extracts text from a PDF.
+    
+    Args:
+        pdf_path: Path to the PDF file.
+        payer: Name of the payer.
+        policy_name: Name of the policy.
+        year: Year of the policy.
+        use_fast_mode: If True, uses pypdfium2 (very fast). If False, uses pdfplumber (accurate for tables).
+    """
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            full_text = ""
-            for page in pdf.pages:
-                text = page.extract_text()
+        full_text = ""
+        if use_fast_mode:
+            # High-speed extraction (recommended for 100+ pages)
+            pdf = pdfium.PdfDocument(pdf_path)
+            for page in pdf:
+                text_page = page.get_textpage()
+                text = text_page.get_text_range()
                 if text:
                     full_text += text
+        else:
+            # High-precision extraction (slower, better for tables/layout)
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        full_text += text
+                        
         return {
             "payer": payer,
             "policy_name": policy_name,
@@ -94,11 +120,22 @@ all_extracted = []
 
 for pdf_info in pdfs:
     print(f"Processing: {pdf_info['path']}")
+    
+    # Auto-detect if we should use fast mode based on file size/complexity
+    # (Assuming we want accuracy by default unless it's huge)
+    use_fast = False
+    if os.path.exists(pdf_info["path"]):
+        file_size_mb = os.path.getsize(pdf_info["path"]) / (1024 * 1024)
+        if file_size_mb > 5:  # If larger than 5MB, use fast mode
+            use_fast = True
+            print(f"   ⚡ Large file detected ({file_size_mb:.2f}MB). Using Fast Mode.")
+
     result = extract_pdf(
         pdf_info["path"],
         pdf_info["payer"],
         pdf_info["policy"],
-        pdf_info["year"]
+        pdf_info["year"],
+        use_fast_mode=use_fast
     )
     if result:
         all_extracted.append(result)

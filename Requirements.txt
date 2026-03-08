@@ -6,3 +6,6 @@ passlib[bcrypt]
 python-multipart
 pydantic-settings
 sqladmin
+pdfplumber
+pypdfium2
+
