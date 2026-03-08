@@ -1,0 +1,920 @@
+[
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with contrast",
+      "icd10_code": "I42.0",
+      "diagnosis": "Dilated Cardiomyopathy"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes from treating physician",
+        "Prior echocardiogram report with LVEF value",
+        "ICD-10 diagnosis code documentation",
+        "Letter of medical necessity",
+        "Failed conservative treatment history",
+        "Symptoms documentation including duration"
+      ],
+      "clinical_criteria": [
+        "LVEF must be documented",
+        "Symptoms present for minimum 3 months",
+        "Prior echocardiogram must be within 12 months",
+        "Diagnosis must be confirmed by physician"
+      ],
+      "bypass_condition": "If LVEF below 40% automatic approval triggered",
+      "source": "UHC Cardiology Radiology Imaging Guidelines 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "75561",
+      "procedure": "Cardiac MRI without contrast",
+      "icd10_code": "I25.10",
+      "diagnosis": "Coronary Artery Disease"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes from treating physician",
+        "Prior stress test results",
+        "ICD-10 diagnosis code documentation",
+        "Letter of medical necessity",
+        "Reason contrast cannot be used"
+      ],
+      "clinical_criteria": [
+        "Prior non-invasive testing documented",
+        "Clinical symptoms documented",
+        "Physician justification for MRI without contrast"
+      ],
+      "bypass_condition": "None",
+      "source": "UHC Cardiology Radiology Imaging Guidelines 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "78452",
+      "procedure": "Myocardial perfusion imaging",
+      "icd10_code": "I20.9",
+      "diagnosis": "Unstable Angina"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes documenting chest pain",
+        "ECG results",
+        "Prior cardiac history documentation",
+        "ICD-10 diagnosis code",
+        "Physician order with clinical justification"
+      ],
+      "clinical_criteria": [
+        "Chest pain symptoms documented",
+        "ECG changes present or suspected",
+        "Prior cardiac history relevant"
+      ],
+      "bypass_condition": "Emergency cases exempt from PA",
+      "source": "UHC Cardiology Radiology Imaging Guidelines 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Aetna",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with contrast",
+      "icd10_code": "I42.0",
+      "diagnosis": "Dilated Cardiomyopathy"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes from treating physician",
+        "Prior echocardiogram with LVEF documentation",
+        "ICD-10 diagnosis code",
+        "Letter of medical necessity",
+        "Documentation of symptoms and duration",
+        "Prior treatment history"
+      ],
+      "clinical_criteria": [
+        "LVEF value must be documented",
+        "Symptoms present and documented",
+        "Prior imaging results if available",
+        "Physician justification for cardiac MRI"
+      ],
+      "bypass_condition": "None specified",
+      "source": "Aetna Precertification List 2025"
+    }
+  },
+  {
+    "input": {
+      "payer": "Aetna",
+      "cpt_code": "93350",
+      "procedure": "Echocardiography stress test",
+      "icd10_code": "I25.10",
+      "diagnosis": "Coronary Artery Disease"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes with symptoms",
+        "Reason for stress echocardiography",
+        "ICD-10 diagnosis code",
+        "Prior cardiac workup results",
+        "Physician order"
+      ],
+      "clinical_criteria": [
+        "Symptoms of coronary artery disease present",
+        "Clinical indication documented",
+        "Prior workup results if available"
+      ],
+      "bypass_condition": "Emergency cases exempt",
+      "source": "Aetna Precertification List 2025"
+    }
+  },
+  {
+    "input": {
+      "payer": "Cigna",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with contrast",
+      "icd10_code": "I42.0",
+      "diagnosis": "Dilated Cardiomyopathy"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes from ordering physician",
+        "Prior echocardiogram report",
+        "LVEF documentation",
+        "ICD-10 diagnosis code",
+        "Medical necessity letter",
+        "Symptom history and duration"
+      ],
+      "clinical_criteria": [
+        "Prior echocardiogram results required",
+        "LVEF below 55% documented",
+        "Symptoms documented for minimum 4 weeks",
+        "Clinical indication clearly stated"
+      ],
+      "bypass_condition": "LVEF below 35% triggers expedited review",
+      "source": "Cigna Cardiac Imaging Guidelines 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Cigna",
+      "cpt_code": "75572",
+      "procedure": "CT heart with contrast",
+      "icd10_code": "I25.10",
+      "diagnosis": "Coronary Artery Disease"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes from treating physician",
+        "Symptoms documentation",
+        "ICD-10 diagnosis code",
+        "Prior cardiac test results",
+        "Physician justification letter"
+      ],
+      "clinical_criteria": [
+        "Symptoms of coronary artery disease present",
+        "Prior stress test or imaging results",
+        "Clinical indication clearly documented"
+      ],
+      "bypass_condition": "None",
+      "source": "Cigna Cardiac Imaging Guidelines 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Humana",
+      "cpt_code": "93228",
+      "procedure": "Mobile cardiac outpatient telemetry",
+      "icd10_code": "I49.9",
+      "diagnosis": "Cardiac Arrhythmia"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes documenting symptoms",
+        "Prior ECG or Holter monitor results",
+        "ICD-10 diagnosis code",
+        "Physician order with clinical justification",
+        "Documentation of symptom frequency"
+      ],
+      "clinical_criteria": [
+        "Symptoms infrequent less than once per 48 hours",
+        "Prior standard monitoring non-diagnostic",
+        "Suspected arrhythmic etiology documented"
+      ],
+      "bypass_condition": "None",
+      "source": "Humana Cardiac Devices SC Medicaid 2025"
+    }
+  },
+  {
+    "input": {
+      "payer": "Blue Cross Blue Shield Texas",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with contrast",
+      "icd10_code": "I42.0",
+      "diagnosis": "Dilated Cardiomyopathy"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes from treating physician",
+        "Prior echocardiogram with LVEF",
+        "ICD-10 diagnosis code documentation",
+        "Letter of medical necessity",
+        "Treatment history documentation"
+      ],
+      "clinical_criteria": [
+        "LVEF documented",
+        "Clinical symptoms present",
+        "Prior imaging results if available",
+        "Physician justification provided"
+      ],
+      "bypass_condition": "None specified",
+      "source": "BCBS Texas Prior Authorization Services 2025"
+    }
+  },
+  {
+    "input": {
+      "payer": "CMS Medicare",
+      "cpt_code": "78452",
+      "procedure": "Myocardial perfusion imaging",
+      "icd10_code": "I25.10",
+      "diagnosis": "Coronary Artery Disease"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "Clinical notes with diagnosis",
+        "ECG results",
+        "Prior cardiac imaging if available",
+        "Physician order",
+        "ICD-10 diagnosis code",
+        "Medical necessity documentation"
+      ],
+      "clinical_criteria": [
+        "Diagnosis of coronary artery disease confirmed",
+        "Clinical symptoms documented",
+        "Medical necessity established by physician",
+        "Prior testing results if available"
+      ],
+      "bypass_condition": "Emergency cases exempt from PA requirements",
+      "source": "CMS Medicare LCD Cardiac Radionuclide Imaging 2019"
+    }
+  },
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with Stress Imaging",
+      "icd10_code": "I42.0",
+      "diagnosis": "Cardiac MRI with Stress Imaging"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "echocardiogram_report",
+        "prior_treatment_records",
+        "physician_order",
+        "lab_results"
+      ],
+      "clinical_criteria": [
+        "Cardiac Diagnosis Required: Diagnosis must be a qualifying cardiac condition",
+        "Cardiology Specialist Required: Must be ordered by a Cardiology specialist",
+        "Echocardiogram Report: Echocardiogram must be present and inconclusive",
+        "LVEF Documented: LVEF percentage must be documented",
+        "Prior Treatment Failed: Prior medical treatment must have been attempted and failed",
+        "Prior Medication Documented: Prior medication trial must be documented",
+        "Clinical Justification Note: Clinical justification note must be submitted"
+      ],
+      "bypass_condition": "LVEF below 40% qualifies for automatic approval; Acute myocardial infarction qualifies for automatic approval",
+      "source": "Synthetic UHC Cardiac Imaging Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "27447",
+      "procedure": "Total Knee Replacement",
+      "icd10_code": "M17.11",
+      "diagnosis": "Total Knee Replacement"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "xray_report",
+        "physical_therapy_records",
+        "physician_order",
+        "bmi_documentation",
+        "conservative_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Knee Diagnosis Required: Diagnosis must be osteoarthritis or qualifying knee condition",
+        "Orthopedic Specialist Required: Must be ordered by an Orthopedic surgeon",
+        "Conservative Treatment Failed: Conservative treatment must have failed",
+        "Clinical Justification: Clinical justification required",
+        "Prior Pain Management: Prior pain management medications must be documented"
+      ],
+      "bypass_condition": "Acute traumatic injury qualifies for bypass",
+      "source": "Synthetic UHC Orthopedic Surgery Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "72148",
+      "procedure": "MRI Lumbar Spine without Contrast",
+      "icd10_code": "M54.5",
+      "diagnosis": "MRI Lumbar Spine without Contrast"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "physical_therapy_records",
+        "physician_order",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Lumbar Diagnosis Required: Diagnosis must be qualifying lumbar spine condition",
+        "Ordering Physician: Must be ordered by qualified physician",
+        "Conservative Treatment Failed: At least 6 weeks conservative treatment required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Neurological deficit or cauda equina syndrome; Serious pathology suspected",
+      "source": "Synthetic UHC Radiology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "95251",
+      "procedure": "Continuous Glucose Monitor Ambulation Analysis",
+      "icd10_code": "E11.65",
+      "diagnosis": "Continuous Glucose Monitor Ambulation Analysis"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "lab_results",
+        "physician_order",
+        "diabetes_management_records"
+      ],
+      "clinical_criteria": [
+        "Diabetes Diagnosis Required: Diagnosis must be Type 1 or Type 2 Diabetes",
+        "Ordering Physician: Must be ordered by qualified physician",
+        "HbA1c Lab Result Required: HbA1c lab result must be documented",
+        "Clinical Justification: Clinical justification required",
+        "Current Diabetes Medication: Current diabetes medication must be documented"
+      ],
+      "bypass_condition": "Type 1 Diabetes automatically qualifies for CGM",
+      "source": "Synthetic UHC Diabetes Management Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "United Healthcare",
+      "cpt_code": "64615",
+      "procedure": "Botulinum Toxin Injection for Chronic Migraine",
+      "icd10_code": "G43.909",
+      "diagnosis": "Botulinum Toxin Injection for Chronic Migraine"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "migraine_diary",
+        "physician_order",
+        "prior_treatment_records",
+        "neurology_consultation_note"
+      ],
+      "clinical_criteria": [
+        "Chronic Migraine Diagnosis: Diagnosis must be Chronic Migraine (15+ headache days per month)",
+        "Neurology Specialist Required: Must be ordered by Neurologist or headache specialist",
+        "Prior Preventive Treatment Failed: At least 2 preventive medications must have failed",
+        "Failed Medications Documented: Prior failed medications must be documented",
+        "Migraine Frequency Documented: Migraine frequency and severity must be documented",
+        "Chronic Duration: Chronic migraine must be documented for at least 3 months"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic UHC Neurology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Aetna",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with Stress Imaging",
+      "icd10_code": "I42.0",
+      "diagnosis": "Cardiac MRI with Stress Imaging"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "echocardiogram_report",
+        "physician_order",
+        "lab_results"
+      ],
+      "clinical_criteria": [
+        "Cardiac Diagnosis: Qualifying cardiac diagnosis required",
+        "Specialist Required: Cardiology specialist required",
+        "Inconclusive Echo Required: Echocardiogram must be inconclusive or non-diagnostic",
+        "LVEF Documented: LVEF must be documented",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Severely reduced LVEF below 35%",
+      "source": "Synthetic Aetna Cardiac Imaging Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Aetna",
+      "cpt_code": "27447",
+      "procedure": "Total Knee Replacement",
+      "icd10_code": "M17.11",
+      "diagnosis": "Total Knee Replacement"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "xray_report",
+        "physical_therapy_records",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Knee OA Diagnosis: Osteoarthritis diagnosis required",
+        "Orthopedic Surgeon: Orthopedic surgeon required",
+        "Failed Conservative Treatment: Conservative treatment must have failed",
+        "Functional Limitation Documented: Functional limitation must be documented"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic Aetna Orthopedic Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Aetna",
+      "cpt_code": "72148",
+      "procedure": "MRI Lumbar Spine without Contrast",
+      "icd10_code": "M54.5",
+      "diagnosis": "MRI Lumbar Spine without Contrast"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "physician_order",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Lumbar Diagnosis: Lumbar spine diagnosis required",
+        "Conservative Treatment Failed: 6 weeks conservative treatment required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Cauda equina syndrome requires immediate imaging",
+      "source": "Synthetic Aetna Radiology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Aetna",
+      "cpt_code": "95251",
+      "procedure": "Continuous Glucose Monitor Analysis",
+      "icd10_code": "E11.65",
+      "diagnosis": "Continuous Glucose Monitor Analysis"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "lab_results",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Diabetes Diagnosis: Diabetes diagnosis required",
+        "HbA1c Required: HbA1c result required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Type 1 Diabetes auto qualifies",
+      "source": "Synthetic Aetna Diabetes Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Aetna",
+      "cpt_code": "64615",
+      "procedure": "Botulinum Toxin for Chronic Migraine",
+      "icd10_code": "G43.909",
+      "diagnosis": "Botulinum Toxin for Chronic Migraine"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "migraine_diary",
+        "physician_order",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Chronic Migraine Diagnosis: Chronic migraine diagnosis required",
+        "Neurology Required: Neurologist required",
+        "Failed Preventive Meds: 2 preventive medications must have failed",
+        "Migraine Frequency: Migraine frequency documentation required"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic Aetna Neurology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Cigna",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with Stress Imaging",
+      "icd10_code": "I42.0",
+      "diagnosis": "Cardiac MRI with Stress Imaging"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "echocardiogram_report",
+        "physician_order",
+        "lab_results",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Cardiac Diagnosis: Qualifying cardiac diagnosis required",
+        "Cardiology Required: Cardiology specialist required",
+        "Echo Required: Echocardiogram required and must be inconclusive",
+        "LVEF Documented: LVEF must be documented",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Reduced LVEF below 40%",
+      "source": "Synthetic Cigna EviCore Cardiac Imaging Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Cigna",
+      "cpt_code": "27447",
+      "procedure": "Total Knee Replacement",
+      "icd10_code": "M17.11",
+      "diagnosis": "Total Knee Replacement"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "xray_report",
+        "physical_therapy_records",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "OA Diagnosis: Knee osteoarthritis diagnosis required",
+        "Orthopedic Surgeon: Orthopedic surgeon required",
+        "Failed Conservative Treatment: Conservative treatment must have failed",
+        "Functional Impairment: Functional impairment documentation required"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic Cigna Orthopedic Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Cigna",
+      "cpt_code": "72148",
+      "procedure": "MRI Lumbar Spine without Contrast",
+      "icd10_code": "M54.5",
+      "diagnosis": "MRI Lumbar Spine without Contrast"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Lumbar Diagnosis: Lumbar diagnosis required",
+        "Conservative Treatment: Conservative treatment required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Cauda equina syndrome emergency",
+      "source": "Synthetic Cigna Radiology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Cigna",
+      "cpt_code": "95251",
+      "procedure": "Continuous Glucose Monitor Analysis",
+      "icd10_code": "E11.65",
+      "diagnosis": "Continuous Glucose Monitor Analysis"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "lab_results",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Diabetes Diagnosis: Diabetes diagnosis required",
+        "HbA1c Required: HbA1c required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Type 1 Diabetes auto qualifies",
+      "source": "Synthetic Cigna Diabetes Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Cigna",
+      "cpt_code": "64615",
+      "procedure": "Botulinum Toxin for Chronic Migraine",
+      "icd10_code": "G43.909",
+      "diagnosis": "Botulinum Toxin for Chronic Migraine"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "migraine_diary",
+        "physician_order",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Chronic Migraine: Chronic migraine diagnosis required",
+        "Neurology: Neurologist required",
+        "Failed Preventive Meds: 2 preventive medications must have failed",
+        "Migraine Frequency: Migraine frequency documentation required"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic Cigna Neurology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Humana",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with Stress Imaging",
+      "icd10_code": "I42.0",
+      "diagnosis": "Cardiac MRI with Stress Imaging"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "echocardiogram_report",
+        "physician_order",
+        "lab_results"
+      ],
+      "clinical_criteria": [
+        "Cardiac Diagnosis: Cardiac diagnosis required",
+        "Cardiology Required: Cardiology specialist required",
+        "Echo Required: Echocardiogram required",
+        "LVEF Documented: LVEF must be documented",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "LVEF below 40% auto approved",
+      "source": "Synthetic Humana Cardiac Imaging Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Humana",
+      "cpt_code": "27447",
+      "procedure": "Total Knee Replacement",
+      "icd10_code": "M17.11",
+      "diagnosis": "Total Knee Replacement"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "xray_report",
+        "physical_therapy_records",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Knee OA: Knee OA diagnosis required",
+        "Orthopedic Surgeon: Orthopedic surgeon required",
+        "Failed Conservative Treatment: Conservative treatment must have failed",
+        "Functional Limitation: Functional limitation required"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic Humana Orthopedic Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Humana",
+      "cpt_code": "72148",
+      "procedure": "MRI Lumbar Spine without Contrast",
+      "icd10_code": "M54.5",
+      "diagnosis": "MRI Lumbar Spine without Contrast"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Lumbar Diagnosis: Lumbar diagnosis required",
+        "Conservative Treatment: 6 weeks conservative treatment required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Cauda equina syndrome",
+      "source": "Synthetic Humana Radiology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Humana",
+      "cpt_code": "95251",
+      "procedure": "Continuous Glucose Monitor Analysis",
+      "icd10_code": "E11.65",
+      "diagnosis": "Continuous Glucose Monitor Analysis"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "lab_results",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Diabetes Diagnosis: Diabetes diagnosis required",
+        "HbA1c Required: HbA1c required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Type 1 Diabetes auto qualifies",
+      "source": "Synthetic Humana Diabetes Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Humana",
+      "cpt_code": "64615",
+      "procedure": "Botulinum Toxin for Chronic Migraine",
+      "icd10_code": "G43.909",
+      "diagnosis": "Botulinum Toxin for Chronic Migraine"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "migraine_diary",
+        "physician_order",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Chronic Migraine: Chronic migraine required",
+        "Neurology: Neurologist required",
+        "Failed Preventive Meds: 2 preventive medications must have failed",
+        "Migraine Frequency: Migraine frequency required"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic Humana Neurology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Blue Cross Blue Shield",
+      "cpt_code": "75563",
+      "procedure": "Cardiac MRI with Stress Imaging",
+      "icd10_code": "I42.0",
+      "diagnosis": "Cardiac MRI with Stress Imaging"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "echocardiogram_report",
+        "physician_order",
+        "lab_results",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Cardiac Diagnosis: Cardiac diagnosis required",
+        "Cardiology Required: Cardiology specialist required",
+        "Echo Required: Echocardiogram required",
+        "LVEF Documented: LVEF must be documented",
+        "Prior Treatment Failed: Prior medical treatment must have failed",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "LVEF below 40% auto approved",
+      "source": "Synthetic BCBS Carelon Cardiac Imaging Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Blue Cross Blue Shield",
+      "cpt_code": "27447",
+      "procedure": "Total Knee Replacement",
+      "icd10_code": "M17.11",
+      "diagnosis": "Total Knee Replacement"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "xray_report",
+        "physical_therapy_records",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Knee OA Diagnosis: Knee OA diagnosis required",
+        "Orthopedic Surgeon: Orthopedic surgeon required",
+        "Conservative Treatment Failed: Conservative treatment must have failed",
+        "Functional Limitation: Functional limitation required"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic BCBS Orthopedic Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Blue Cross Blue Shield",
+      "cpt_code": "72148",
+      "procedure": "MRI Lumbar Spine without Contrast",
+      "icd10_code": "M54.5",
+      "diagnosis": "MRI Lumbar Spine without Contrast"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Lumbar Diagnosis: Lumbar diagnosis required",
+        "Conservative Treatment: 6 weeks conservative treatment required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Cauda equina syndrome",
+      "source": "Synthetic BCBS Radiology Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Blue Cross Blue Shield",
+      "cpt_code": "95251",
+      "procedure": "Continuous Glucose Monitor Analysis",
+      "icd10_code": "E11.65",
+      "diagnosis": "Continuous Glucose Monitor Analysis"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "lab_results",
+        "physician_order"
+      ],
+      "clinical_criteria": [
+        "Diabetes Diagnosis: Diabetes diagnosis required",
+        "HbA1c Required: HbA1c required",
+        "Clinical Justification: Clinical justification required"
+      ],
+      "bypass_condition": "Type 1 Diabetes auto qualifies",
+      "source": "Synthetic BCBS Diabetes Policy 2026"
+    }
+  },
+  {
+    "input": {
+      "payer": "Blue Cross Blue Shield",
+      "cpt_code": "64615",
+      "procedure": "Botulinum Toxin for Chronic Migraine",
+      "icd10_code": "G43.909",
+      "diagnosis": "Botulinum Toxin for Chronic Migraine"
+    },
+    "output": {
+      "pa_required": true,
+      "required_documents": [
+        "clinical_justification_note",
+        "migraine_diary",
+        "physician_order",
+        "prior_treatment_records"
+      ],
+      "clinical_criteria": [
+        "Chronic Migraine: Chronic migraine required",
+        "Neurology: Neurologist required",
+        "Failed Preventive Meds: 2 preventive medications must have failed",
+        "Migraine Frequency: Migraine frequency required"
+      ],
+      "bypass_condition": "None",
+      "source": "Synthetic BCBS Neurology Policy 2026"
+    }
+  }
+]

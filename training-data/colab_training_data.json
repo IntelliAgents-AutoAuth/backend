@@ -1,0 +1,212 @@
+[
+  {
+    "input": "Payer: United Healthcare. CPT Code: 75563. Procedure: Cardiac MRI with contrast. Diagnosis: Dilated Cardiomyopathy. ICD10: I42.0.",
+    "output": "Required Documents: Clinical notes from treating physician, Prior echocardiogram report with LVEF value, ICD-10 diagnosis code documentation, Letter of medical necessity, Failed conservative treatment history, Symptoms documentation including duration. Clinical Criteria: LVEF must be documented, Symptoms present for minimum 3 months, Prior echocardiogram must be within 12 months, Diagnosis must be confirmed by physician. Bypass Condition: If LVEF below 40% automatic approval triggered.",
+    "payer": "United Healthcare",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: United Healthcare. CPT Code: 75561. Procedure: Cardiac MRI without contrast. Diagnosis: Coronary Artery Disease. ICD10: I25.10.",
+    "output": "Required Documents: Clinical notes from treating physician, Prior stress test results, ICD-10 diagnosis code documentation, Letter of medical necessity, Reason contrast cannot be used. Clinical Criteria: Prior non-invasive testing documented, Clinical symptoms documented, Physician justification for MRI without contrast. Bypass Condition: None.",
+    "payer": "United Healthcare",
+    "cpt_code": "75561"
+  },
+  {
+    "input": "Payer: United Healthcare. CPT Code: 78452. Procedure: Myocardial perfusion imaging. Diagnosis: Unstable Angina. ICD10: I20.9.",
+    "output": "Required Documents: Clinical notes documenting chest pain, ECG results, Prior cardiac history documentation, ICD-10 diagnosis code, Physician order with clinical justification. Clinical Criteria: Chest pain symptoms documented, ECG changes present or suspected, Prior cardiac history relevant. Bypass Condition: Emergency cases exempt from PA.",
+    "payer": "United Healthcare",
+    "cpt_code": "78452"
+  },
+  {
+    "input": "Payer: Aetna. CPT Code: 75563. Procedure: Cardiac MRI with contrast. Diagnosis: Dilated Cardiomyopathy. ICD10: I42.0.",
+    "output": "Required Documents: Clinical notes from treating physician, Prior echocardiogram with LVEF documentation, ICD-10 diagnosis code, Letter of medical necessity, Documentation of symptoms and duration, Prior treatment history. Clinical Criteria: LVEF value must be documented, Symptoms present and documented, Prior imaging results if available, Physician justification for cardiac MRI. Bypass Condition: None specified.",
+    "payer": "Aetna",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: Aetna. CPT Code: 93350. Procedure: Echocardiography stress test. Diagnosis: Coronary Artery Disease. ICD10: I25.10.",
+    "output": "Required Documents: Clinical notes with symptoms, Reason for stress echocardiography, ICD-10 diagnosis code, Prior cardiac workup results, Physician order. Clinical Criteria: Symptoms of coronary artery disease present, Clinical indication documented, Prior workup results if available. Bypass Condition: Emergency cases exempt.",
+    "payer": "Aetna",
+    "cpt_code": "93350"
+  },
+  {
+    "input": "Payer: Cigna. CPT Code: 75563. Procedure: Cardiac MRI with contrast. Diagnosis: Dilated Cardiomyopathy. ICD10: I42.0.",
+    "output": "Required Documents: Clinical notes from ordering physician, Prior echocardiogram report, LVEF documentation, ICD-10 diagnosis code, Medical necessity letter, Symptom history and duration. Clinical Criteria: Prior echocardiogram results required, LVEF below 55% documented, Symptoms documented for minimum 4 weeks, Clinical indication clearly stated. Bypass Condition: LVEF below 35% triggers expedited review.",
+    "payer": "Cigna",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: Cigna. CPT Code: 75572. Procedure: CT heart with contrast. Diagnosis: Coronary Artery Disease. ICD10: I25.10.",
+    "output": "Required Documents: Clinical notes from treating physician, Symptoms documentation, ICD-10 diagnosis code, Prior cardiac test results, Physician justification letter. Clinical Criteria: Symptoms of coronary artery disease present, Prior stress test or imaging results, Clinical indication clearly documented. Bypass Condition: None.",
+    "payer": "Cigna",
+    "cpt_code": "75572"
+  },
+  {
+    "input": "Payer: Humana. CPT Code: 93228. Procedure: Mobile cardiac outpatient telemetry. Diagnosis: Cardiac Arrhythmia. ICD10: I49.9.",
+    "output": "Required Documents: Clinical notes documenting symptoms, Prior ECG or Holter monitor results, ICD-10 diagnosis code, Physician order with clinical justification, Documentation of symptom frequency. Clinical Criteria: Symptoms infrequent less than once per 48 hours, Prior standard monitoring non-diagnostic, Suspected arrhythmic etiology documented. Bypass Condition: None.",
+    "payer": "Humana",
+    "cpt_code": "93228"
+  },
+  {
+    "input": "Payer: Blue Cross Blue Shield Texas. CPT Code: 75563. Procedure: Cardiac MRI with contrast. Diagnosis: Dilated Cardiomyopathy. ICD10: I42.0.",
+    "output": "Required Documents: Clinical notes from treating physician, Prior echocardiogram with LVEF, ICD-10 diagnosis code documentation, Letter of medical necessity, Treatment history documentation. Clinical Criteria: LVEF documented, Clinical symptoms present, Prior imaging results if available, Physician justification provided. Bypass Condition: None specified.",
+    "payer": "Blue Cross Blue Shield Texas",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: CMS Medicare. CPT Code: 78452. Procedure: Myocardial perfusion imaging. Diagnosis: Coronary Artery Disease. ICD10: I25.10.",
+    "output": "Required Documents: Clinical notes with diagnosis, ECG results, Prior cardiac imaging if available, Physician order, ICD-10 diagnosis code, Medical necessity documentation. Clinical Criteria: Diagnosis of coronary artery disease confirmed, Clinical symptoms documented, Medical necessity established by physician, Prior testing results if available. Bypass Condition: Emergency cases exempt from PA requirements.",
+    "payer": "CMS Medicare",
+    "cpt_code": "78452"
+  },
+  {
+    "input": "Payer: United Healthcare. CPT Code: 75563. Procedure: Cardiac MRI with Stress Imaging. Diagnosis: Cardiac MRI with Stress Imaging. ICD10: I42.0.",
+    "output": "Required Documents: clinical_justification_note, echocardiogram_report, prior_treatment_records, physician_order, lab_results. Clinical Criteria: Cardiac Diagnosis Required: Diagnosis must be a qualifying cardiac condition, Cardiology Specialist Required: Must be ordered by a Cardiology specialist, Echocardiogram Report: Echocardiogram must be present and inconclusive, LVEF Documented: LVEF percentage must be documented, Prior Treatment Failed: Prior medical treatment must have been attempted and failed, Prior Medication Documented: Prior medication trial must be documented, Clinical Justification Note: Clinical justification note must be submitted. Bypass Condition: LVEF below 40% qualifies for automatic approval; Acute myocardial infarction qualifies for automatic approval.",
+    "payer": "United Healthcare",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: United Healthcare. CPT Code: 27447. Procedure: Total Knee Replacement. Diagnosis: Total Knee Replacement. ICD10: M17.11.",
+    "output": "Required Documents: clinical_justification_note, xray_report, physical_therapy_records, physician_order, bmi_documentation, conservative_treatment_records. Clinical Criteria: Knee Diagnosis Required: Diagnosis must be osteoarthritis or qualifying knee condition, Orthopedic Specialist Required: Must be ordered by an Orthopedic surgeon, Conservative Treatment Failed: Conservative treatment must have failed, Clinical Justification: Clinical justification required, Prior Pain Management: Prior pain management medications must be documented. Bypass Condition: Acute traumatic injury qualifies for bypass.",
+    "payer": "United Healthcare",
+    "cpt_code": "27447"
+  },
+  {
+    "input": "Payer: United Healthcare. CPT Code: 72148. Procedure: MRI Lumbar Spine without Contrast. Diagnosis: MRI Lumbar Spine without Contrast. ICD10: M54.5.",
+    "output": "Required Documents: clinical_justification_note, physical_therapy_records, physician_order, prior_treatment_records. Clinical Criteria: Lumbar Diagnosis Required: Diagnosis must be qualifying lumbar spine condition, Ordering Physician: Must be ordered by qualified physician, Conservative Treatment Failed: At least 6 weeks conservative treatment required, Clinical Justification: Clinical justification required. Bypass Condition: Neurological deficit or cauda equina syndrome; Serious pathology suspected.",
+    "payer": "United Healthcare",
+    "cpt_code": "72148"
+  },
+  {
+    "input": "Payer: United Healthcare. CPT Code: 95251. Procedure: Continuous Glucose Monitor Ambulation Analysis. Diagnosis: Continuous Glucose Monitor Ambulation Analysis. ICD10: E11.65.",
+    "output": "Required Documents: clinical_justification_note, lab_results, physician_order, diabetes_management_records. Clinical Criteria: Diabetes Diagnosis Required: Diagnosis must be Type 1 or Type 2 Diabetes, Ordering Physician: Must be ordered by qualified physician, HbA1c Lab Result Required: HbA1c lab result must be documented, Clinical Justification: Clinical justification required, Current Diabetes Medication: Current diabetes medication must be documented. Bypass Condition: Type 1 Diabetes automatically qualifies for CGM.",
+    "payer": "United Healthcare",
+    "cpt_code": "95251"
+  },
+  {
+    "input": "Payer: United Healthcare. CPT Code: 64615. Procedure: Botulinum Toxin Injection for Chronic Migraine. Diagnosis: Botulinum Toxin Injection for Chronic Migraine. ICD10: G43.909.",
+    "output": "Required Documents: clinical_justification_note, migraine_diary, physician_order, prior_treatment_records, neurology_consultation_note. Clinical Criteria: Chronic Migraine Diagnosis: Diagnosis must be Chronic Migraine (15+ headache days per month), Neurology Specialist Required: Must be ordered by Neurologist or headache specialist, Prior Preventive Treatment Failed: At least 2 preventive medications must have failed, Failed Medications Documented: Prior failed medications must be documented, Migraine Frequency Documented: Migraine frequency and severity must be documented, Chronic Duration: Chronic migraine must be documented for at least 3 months. Bypass Condition: None.",
+    "payer": "United Healthcare",
+    "cpt_code": "64615"
+  },
+  {
+    "input": "Payer: Aetna. CPT Code: 75563. Procedure: Cardiac MRI with Stress Imaging. Diagnosis: Cardiac MRI with Stress Imaging. ICD10: I42.0.",
+    "output": "Required Documents: clinical_justification_note, echocardiogram_report, physician_order, lab_results. Clinical Criteria: Cardiac Diagnosis: Qualifying cardiac diagnosis required, Specialist Required: Cardiology specialist required, Inconclusive Echo Required: Echocardiogram must be inconclusive or non-diagnostic, LVEF Documented: LVEF must be documented, Clinical Justification: Clinical justification required. Bypass Condition: Severely reduced LVEF below 35%.",
+    "payer": "Aetna",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: Aetna. CPT Code: 27447. Procedure: Total Knee Replacement. Diagnosis: Total Knee Replacement. ICD10: M17.11.",
+    "output": "Required Documents: clinical_justification_note, xray_report, physical_therapy_records, physician_order. Clinical Criteria: Knee OA Diagnosis: Osteoarthritis diagnosis required, Orthopedic Surgeon: Orthopedic surgeon required, Failed Conservative Treatment: Conservative treatment must have failed, Functional Limitation Documented: Functional limitation must be documented. Bypass Condition: None.",
+    "payer": "Aetna",
+    "cpt_code": "27447"
+  },
+  {
+    "input": "Payer: Aetna. CPT Code: 72148. Procedure: MRI Lumbar Spine without Contrast. Diagnosis: MRI Lumbar Spine without Contrast. ICD10: M54.5.",
+    "output": "Required Documents: clinical_justification_note, physician_order, prior_treatment_records. Clinical Criteria: Lumbar Diagnosis: Lumbar spine diagnosis required, Conservative Treatment Failed: 6 weeks conservative treatment required, Clinical Justification: Clinical justification required. Bypass Condition: Cauda equina syndrome requires immediate imaging.",
+    "payer": "Aetna",
+    "cpt_code": "72148"
+  },
+  {
+    "input": "Payer: Aetna. CPT Code: 95251. Procedure: Continuous Glucose Monitor Analysis. Diagnosis: Continuous Glucose Monitor Analysis. ICD10: E11.65.",
+    "output": "Required Documents: clinical_justification_note, lab_results, physician_order. Clinical Criteria: Diabetes Diagnosis: Diabetes diagnosis required, HbA1c Required: HbA1c result required, Clinical Justification: Clinical justification required. Bypass Condition: Type 1 Diabetes auto qualifies.",
+    "payer": "Aetna",
+    "cpt_code": "95251"
+  },
+  {
+    "input": "Payer: Aetna. CPT Code: 64615. Procedure: Botulinum Toxin for Chronic Migraine. Diagnosis: Botulinum Toxin for Chronic Migraine. ICD10: G43.909.",
+    "output": "Required Documents: clinical_justification_note, migraine_diary, physician_order, prior_treatment_records. Clinical Criteria: Chronic Migraine Diagnosis: Chronic migraine diagnosis required, Neurology Required: Neurologist required, Failed Preventive Meds: 2 preventive medications must have failed, Migraine Frequency: Migraine frequency documentation required. Bypass Condition: None.",
+    "payer": "Aetna",
+    "cpt_code": "64615"
+  },
+  {
+    "input": "Payer: Cigna. CPT Code: 75563. Procedure: Cardiac MRI with Stress Imaging. Diagnosis: Cardiac MRI with Stress Imaging. ICD10: I42.0.",
+    "output": "Required Documents: clinical_justification_note, echocardiogram_report, physician_order, lab_results, prior_treatment_records. Clinical Criteria: Cardiac Diagnosis: Qualifying cardiac diagnosis required, Cardiology Required: Cardiology specialist required, Echo Required: Echocardiogram required and must be inconclusive, LVEF Documented: LVEF must be documented, Clinical Justification: Clinical justification required. Bypass Condition: Reduced LVEF below 40%.",
+    "payer": "Cigna",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: Cigna. CPT Code: 27447. Procedure: Total Knee Replacement. Diagnosis: Total Knee Replacement. ICD10: M17.11.",
+    "output": "Required Documents: clinical_justification_note, xray_report, physical_therapy_records, physician_order. Clinical Criteria: OA Diagnosis: Knee osteoarthritis diagnosis required, Orthopedic Surgeon: Orthopedic surgeon required, Failed Conservative Treatment: Conservative treatment must have failed, Functional Impairment: Functional impairment documentation required. Bypass Condition: None.",
+    "payer": "Cigna",
+    "cpt_code": "27447"
+  },
+  {
+    "input": "Payer: Cigna. CPT Code: 72148. Procedure: MRI Lumbar Spine without Contrast. Diagnosis: MRI Lumbar Spine without Contrast. ICD10: M54.5.",
+    "output": "Required Documents: clinical_justification_note, physician_order. Clinical Criteria: Lumbar Diagnosis: Lumbar diagnosis required, Conservative Treatment: Conservative treatment required, Clinical Justification: Clinical justification required. Bypass Condition: Cauda equina syndrome emergency.",
+    "payer": "Cigna",
+    "cpt_code": "72148"
+  },
+  {
+    "input": "Payer: Cigna. CPT Code: 95251. Procedure: Continuous Glucose Monitor Analysis. Diagnosis: Continuous Glucose Monitor Analysis. ICD10: E11.65.",
+    "output": "Required Documents: clinical_justification_note, lab_results, physician_order. Clinical Criteria: Diabetes Diagnosis: Diabetes diagnosis required, HbA1c Required: HbA1c required, Clinical Justification: Clinical justification required. Bypass Condition: Type 1 Diabetes auto qualifies.",
+    "payer": "Cigna",
+    "cpt_code": "95251"
+  },
+  {
+    "input": "Payer: Cigna. CPT Code: 64615. Procedure: Botulinum Toxin for Chronic Migraine. Diagnosis: Botulinum Toxin for Chronic Migraine. ICD10: G43.909.",
+    "output": "Required Documents: clinical_justification_note, migraine_diary, physician_order, prior_treatment_records. Clinical Criteria: Chronic Migraine: Chronic migraine diagnosis required, Neurology: Neurologist required, Failed Preventive Meds: 2 preventive medications must have failed, Migraine Frequency: Migraine frequency documentation required. Bypass Condition: None.",
+    "payer": "Cigna",
+    "cpt_code": "64615"
+  },
+  {
+    "input": "Payer: Humana. CPT Code: 75563. Procedure: Cardiac MRI with Stress Imaging. Diagnosis: Cardiac MRI with Stress Imaging. ICD10: I42.0.",
+    "output": "Required Documents: clinical_justification_note, echocardiogram_report, physician_order, lab_results. Clinical Criteria: Cardiac Diagnosis: Cardiac diagnosis required, Cardiology Required: Cardiology specialist required, Echo Required: Echocardiogram required, LVEF Documented: LVEF must be documented, Clinical Justification: Clinical justification required. Bypass Condition: LVEF below 40% auto approved.",
+    "payer": "Humana",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: Humana. CPT Code: 27447. Procedure: Total Knee Replacement. Diagnosis: Total Knee Replacement. ICD10: M17.11.",
+    "output": "Required Documents: clinical_justification_note, xray_report, physical_therapy_records, physician_order. Clinical Criteria: Knee OA: Knee OA diagnosis required, Orthopedic Surgeon: Orthopedic surgeon required, Failed Conservative Treatment: Conservative treatment must have failed, Functional Limitation: Functional limitation required. Bypass Condition: None.",
+    "payer": "Humana",
+    "cpt_code": "27447"
+  },
+  {
+    "input": "Payer: Humana. CPT Code: 72148. Procedure: MRI Lumbar Spine without Contrast. Diagnosis: MRI Lumbar Spine without Contrast. ICD10: M54.5.",
+    "output": "Required Documents: clinical_justification_note, physician_order. Clinical Criteria: Lumbar Diagnosis: Lumbar diagnosis required, Conservative Treatment: 6 weeks conservative treatment required, Clinical Justification: Clinical justification required. Bypass Condition: Cauda equina syndrome.",
+    "payer": "Humana",
+    "cpt_code": "72148"
+  },
+  {
+    "input": "Payer: Humana. CPT Code: 95251. Procedure: Continuous Glucose Monitor Analysis. Diagnosis: Continuous Glucose Monitor Analysis. ICD10: E11.65.",
+    "output": "Required Documents: clinical_justification_note, lab_results, physician_order. Clinical Criteria: Diabetes Diagnosis: Diabetes diagnosis required, HbA1c Required: HbA1c required, Clinical Justification: Clinical justification required. Bypass Condition: Type 1 Diabetes auto qualifies.",
+    "payer": "Humana",
+    "cpt_code": "95251"
+  },
+  {
+    "input": "Payer: Humana. CPT Code: 64615. Procedure: Botulinum Toxin for Chronic Migraine. Diagnosis: Botulinum Toxin for Chronic Migraine. ICD10: G43.909.",
+    "output": "Required Documents: clinical_justification_note, migraine_diary, physician_order, prior_treatment_records. Clinical Criteria: Chronic Migraine: Chronic migraine required, Neurology: Neurologist required, Failed Preventive Meds: 2 preventive medications must have failed, Migraine Frequency: Migraine frequency required. Bypass Condition: None.",
+    "payer": "Humana",
+    "cpt_code": "64615"
+  },
+  {
+    "input": "Payer: Blue Cross Blue Shield. CPT Code: 75563. Procedure: Cardiac MRI with Stress Imaging. Diagnosis: Cardiac MRI with Stress Imaging. ICD10: I42.0.",
+    "output": "Required Documents: clinical_justification_note, echocardiogram_report, physician_order, lab_results, prior_treatment_records. Clinical Criteria: Cardiac Diagnosis: Cardiac diagnosis required, Cardiology Required: Cardiology specialist required, Echo Required: Echocardiogram required, LVEF Documented: LVEF must be documented, Prior Treatment Failed: Prior medical treatment must have failed, Clinical Justification: Clinical justification required. Bypass Condition: LVEF below 40% auto approved.",
+    "payer": "Blue Cross Blue Shield",
+    "cpt_code": "75563"
+  },
+  {
+    "input": "Payer: Blue Cross Blue Shield. CPT Code: 27447. Procedure: Total Knee Replacement. Diagnosis: Total Knee Replacement. ICD10: M17.11.",
+    "output": "Required Documents: clinical_justification_note, xray_report, physical_therapy_records, physician_order. Clinical Criteria: Knee OA Diagnosis: Knee OA diagnosis required, Orthopedic Surgeon: Orthopedic surgeon required, Conservative Treatment Failed: Conservative treatment must have failed, Functional Limitation: Functional limitation required. Bypass Condition: None.",
+    "payer": "Blue Cross Blue Shield",
+    "cpt_code": "27447"
+  },
+  {
+    "input": "Payer: Blue Cross Blue Shield. CPT Code: 72148. Procedure: MRI Lumbar Spine without Contrast. Diagnosis: MRI Lumbar Spine without Contrast. ICD10: M54.5.",
+    "output": "Required Documents: clinical_justification_note, physician_order. Clinical Criteria: Lumbar Diagnosis: Lumbar diagnosis required, Conservative Treatment: 6 weeks conservative treatment required, Clinical Justification: Clinical justification required. Bypass Condition: Cauda equina syndrome.",
+    "payer": "Blue Cross Blue Shield",
+    "cpt_code": "72148"
+  },
+  {
+    "input": "Payer: Blue Cross Blue Shield. CPT Code: 95251. Procedure: Continuous Glucose Monitor Analysis. Diagnosis: Continuous Glucose Monitor Analysis. ICD10: E11.65.",
+    "output": "Required Documents: clinical_justification_note, lab_results, physician_order. Clinical Criteria: Diabetes Diagnosis: Diabetes diagnosis required, HbA1c Required: HbA1c required, Clinical Justification: Clinical justification required. Bypass Condition: Type 1 Diabetes auto qualifies.",
+    "payer": "Blue Cross Blue Shield",
+    "cpt_code": "95251"
+  },
+  {
+    "input": "Payer: Blue Cross Blue Shield. CPT Code: 64615. Procedure: Botulinum Toxin for Chronic Migraine. Diagnosis: Botulinum Toxin for Chronic Migraine. ICD10: G43.909.",
+    "output": "Required Documents: clinical_justification_note, migraine_diary, physician_order, prior_treatment_records. Clinical Criteria: Chronic Migraine: Chronic migraine required, Neurology: Neurologist required, Failed Preventive Meds: 2 preventive medications must have failed, Migraine Frequency: Migraine frequency required. Bypass Condition: None.",
+    "payer": "Blue Cross Blue Shield",
+    "cpt_code": "64615"
+  }
+]
