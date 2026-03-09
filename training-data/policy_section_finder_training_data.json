@@ -1,0 +1,357 @@
+[
+  {
+    "input": "REQUIRED DOCUMENTATION\nThe following documents must be submitted with your prior authorization request:\n\u2022 Clinical notes from treating physician\n\u2022 Prior echocardiogram report with LVEF value\n\u2022 Letter of medical necessity\n\u2022 Failed conservative treatment history\n\u2022 ICD-10 diagnosis documentation\n\u2022 Physician order form",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Documentation\nProviders must submit all of the following:\n1. Clinical documentation from ordering cardiologist\n2. Echocardiogram report performed within 12 months\n3. Prior treatment records showing failed therapy\n4. Completed prior authorization request form\n5. Laboratory results including BNP levels",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "SUBMISSION REQUIREMENTS\nAll prior authorization requests for CPT 75563 must include:\n- Letter of medical necessity from treating physician\n- Cardiac echo report with ejection fraction documented\n- Six weeks of conservative treatment records\n- Specialist consultation note from cardiologist\n- Current medication list",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Documentation Requirements\nThe following supporting documents are required for review:\n\u2022 Physician clinical notes dated within 90 days\n\u2022 Echocardiogram or cardiac MRI report\n\u2022 Documentation of prior failed treatments\n\u2022 ICD-10 diagnosis codes supporting medical necessity\n\u2022 Lab results including relevant cardiac biomarkers",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "WHAT TO SUBMIT\nPlease include the following with your authorization request:\n1. Treating physician statement of medical necessity\n2. Recent echocardiogram showing LVEF measurement\n3. History of conservative treatment attempts\n4. Ordering physician referral form\n5. Supporting laboratory findings",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Supporting Documentation Required\nAetna requires the following documentation for precertification:\n\u2022 Completed precertification request form\n\u2022 Clinical notes from the attending physician\n\u2022 Echocardiogram report with LVEF value documented\n\u2022 Records of prior treatment and response\n\u2022 Medical necessity letter from specialist",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "PRECERTIFICATION DOCUMENTATION\nThe following must accompany all precertification requests:\n1. Physician attestation of medical necessity\n2. Prior cardiac imaging report within 6 months\n3. Conservative treatment failure documentation\n4. Current diagnosis with ICD-10 code\n5. Laboratory test results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Documents Needed for Review\nTo process your prior authorization request Aetna requires:\n- Clinical justification letter from ordering physician\n- Echocardiographic report showing cardiac function\n- Failed medication trial records\n- Specialist consultation notes\n- Patient diagnosis documentation",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Submission Documents\nFor CPT code 75563 the following documentation is required:\n\u2022 Medical necessity documentation from cardiologist\n\u2022 Echocardiogram performed within the past year\n\u2022 Six or more weeks of prior treatment records\n\u2022 Physician order and referral\n\u2022 Relevant lab work and diagnostic results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "DOCUMENTATION REQUIREMENTS\nBlue Cross Blue Shield requires providers to submit:\n1. Attending physician clinical notes\n2. Cardiac echo performed within 12 months\n3. Prior medication trial documentation\n4. Completed physician referral form\n5. ICD-10 diagnosis code documentation\n6. Letter supporting medical necessity",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Submission Checklist\nPlease ensure the following documents are included:\n\u2022 Clinical notes from the treating cardiologist\n\u2022 Echocardiogram report with ejection fraction\n\u2022 Documentation of conservative treatment failure\n\u2022 Physician authorization form\n\u2022 Lab results including cardiac enzymes",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Clinical Documentation\nFor prior authorization of cardiac imaging the following must be submitted:\n- Physician letter of medical necessity\n- Recent echocardiogram or cardiac ultrasound report\n- Treatment history and prior medication records\n- Specialist referral documentation\n- Supporting diagnostic test results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "AUTHORIZATION SUBMISSION REQUIREMENTS\nAll requests must include the following documentation:\n1. Clinical justification from ordering physician\n2. Cardiac echocardiogram within past 12 months\n3. Failed conservative therapy documentation\n4. Complete diagnosis with ICD-10 codes\n5. Physician order form and referral",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Documentation for Review\nCigna requires submission of the following clinical documents:\n\u2022 Letter of medical necessity from treating physician\n\u2022 Cardiac echo report showing LVEF measurement\n\u2022 Records of previous treatment attempts\n\u2022 Ordering cardiologist notes and referral\n\u2022 Current laboratory results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "CLINICAL SUBMISSION REQUIREMENTS\nThe following documents are required for all cardiac imaging requests:\n1. Medical necessity documentation\n2. Echocardiogram report from past 6-12 months\n3. Conservative treatment failure history\n4. Physician order and clinical notes\n5. Relevant diagnostic laboratory results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Supporting Documents Required\nPlease submit the following to support your authorization request:\n- Physician clinical justification notes\n- Cardiac ultrasound or echocardiogram report\n- Prior treatment and medication records\n- Specialist consultation documentation\n- Laboratory test results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "REQUIRED DOCUMENTS\nHumana requires the following for prior authorization review:\n\u2022 Clinical notes from the ordering physician\n\u2022 Echocardiogram showing cardiac function and LVEF\n\u2022 Documentation of failed prior treatments\n\u2022 Medical necessity letter\n\u2022 ICD-10 diagnosis codes",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Prior Authorization Documentation\nThe following clinical documents must be submitted:\n1. Treating physician statement\n2. Cardiac echocardiogram report\n3. Prior treatment failure documentation\n4. Physician referral and order form\n5. Relevant lab results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "SUBMISSION DOCUMENTATION REQUIREMENTS\nFor CPT 75563 the following must be included with the request:\n- Clinical justification from treating cardiologist\n- Echocardiographic assessment report\n- Conservative treatment history\n- Medical necessity documentation\n- Supporting laboratory findings",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "REQUIRED DOCUMENTATION FOR KNEE REPLACEMENT\nThe following documents must be submitted:\n\u2022 Clinical notes from orthopedic surgeon\n\u2022 X-ray report showing joint degeneration\n\u2022 Physical therapy records minimum 12 weeks\n\u2022 Failed conservative treatment documentation\n\u2022 BMI documentation if applicable\n\u2022 Physician order form",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Documentation Requirements for Total Knee Replacement\nProviders must submit all of the following:\n1. Orthopedic surgeon clinical notes\n2. Weight bearing X-ray of affected knee\n3. Physical therapy completion records\n4. NSAID and pain management trial records\n5. Medical necessity letter from surgeon",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "SUBMISSION REQUIREMENTS FOR CPT 27447\nRequired documents for prior authorization:\n- Orthopedic surgeon assessment and notes\n- Radiological imaging report for knee\n- Conservative treatment failure records\n- Physical therapy notes minimum 12 weeks\n- Functional limitation documentation",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Documentation for Lumbar MRI\nAll of the following must be submitted:\n\u2022 Clinical notes from treating physician\n\u2022 Documentation of 6 weeks conservative treatment\n\u2022 Physical therapy records if applicable\n\u2022 Neurological assessment if symptoms present\n\u2022 Medical necessity letter",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "DOCUMENTATION REQUIREMENTS FOR SPINE IMAGING\nThe following documents are required:\n1. Physician clinical notes with symptom history\n2. Conservative treatment records minimum 6 weeks\n3. Physical therapy documentation\n4. Neurological examination findings\n5. Medical necessity justification",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Documents for CGM Authorization\nPlease submit the following:\n\u2022 Physician clinical notes confirming diabetes diagnosis\n\u2022 HbA1c laboratory results within past 3 months\n\u2022 Current medication list including insulin regimen\n\u2022 Medical necessity letter from endocrinologist\n\u2022 ICD-10 diabetes diagnosis code",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "DOCUMENTATION REQUIREMENTS FOR GLUCOSE MONITORING\nThe following must be included:\n1. Endocrinologist or physician clinical notes\n2. Recent HbA1c blood test results\n3. Current diabetes medication records\n4. Medical necessity documentation\n5. Diagnosis confirmation with ICD-10 codes",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Documentation for Botulinum Toxin\nAll of the following must be submitted:\n\u2022 Neurology consultation notes\n\u2022 Migraine frequency diary or documentation\n\u2022 Records of failed preventive medications minimum 2\n\u2022 Medical necessity letter from neurologist\n\u2022 ICD-10 chronic migraine diagnosis codes",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "SUBMISSION REQUIREMENTS FOR CHRONIC MIGRAINE TREATMENT\nDocuments required for authorization:\n1. Neurologist clinical assessment notes\n2. Migraine diary showing frequency and severity\n3. Failed medication trial records\n4. Medical necessity documentation\n5. Diagnosis documentation",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Clinical documentation supporting medical necessity must be submitted along with the request. Providers should also include echocardiogram results if available and any prior treatment records.",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "The attending physician must provide clinical notes. An echocardiogram report performed within the last 12 months is required. Laboratory results and prior treatment documentation should also be included.",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Failure to provide lab results and prior treatment history will result in denial. Clinical justification from the ordering physician is mandatory for all requests.",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "All submissions must include physician clinical notes, relevant imaging reports, and documentation of conservative treatment failure. Medical necessity must be clearly established.",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Supporting clinical documentation is required including physician notes, diagnostic imaging reports, and prior treatment records. Incomplete submissions will be returned.",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Information Required for Review\nTo complete the review process please provide:\n\u2022 Ordering physician notes and clinical history\n\u2022 Cardiac imaging or echocardiogram report\n\u2022 Documentation supporting medical necessity\n\u2022 Evidence of failed prior treatments\n\u2022 Current diagnostic test results",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "CLINICAL INFORMATION REQUIRED\nPlease submit the following clinical information:\n1. Physician clinical notes\n2. Relevant diagnostic imaging reports\n3. Laboratory test results\n4. Prior treatment documentation\n5. Medical necessity justification letter",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Documents to Include with Request\nYour authorization request should include:\n- Physician statement of medical necessity\n- Relevant imaging and laboratory reports\n- Conservative treatment history\n- Specialist consultation if applicable\n- ICD-10 diagnosis documentation",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "PRIOR AUTHORIZATION CHECKLIST\nEnsure the following documents are included:\n\u2022 Clinical notes from treating physician\n\u2022 Relevant diagnostic reports and imaging\n\u2022 Laboratory results\n\u2022 Prior treatment failure documentation\n\u2022 Medical necessity letter",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "Required Information for Processing\nThe following information is needed to process your request:\n1. Physician clinical documentation\n2. Diagnostic test results and imaging reports\n3. Treatment history and prior medication records\n4. Medical necessity documentation\n5. Complete ICD-10 diagnosis codes",
+    "label": "REQUIRED_DOC_SECTION",
+    "is_required_doc_section": true
+  },
+  {
+    "input": "POLICY OVERVIEW\nThis policy applies to all United Healthcare commercial members. Prior authorization is required for advanced cardiac imaging procedures including CPT codes 75557, 75559, 75561, 75563, and 75565.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Overview\nThis document outlines the prior authorization requirements for cardiac imaging services. These requirements apply to all fully insured commercial plans effective January 1 2026.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "PURPOSE\nThe purpose of this policy is to ensure that cardiac MRI procedures are medically necessary and appropriate for the patient's condition. This policy applies to all network and out of network providers.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "INTRODUCTION\nUnited Healthcare requires prior authorization for select advanced imaging services. This policy establishes the criteria for approval of cardiac magnetic resonance imaging procedures.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Policy Statement\nAetna covers cardiac MRI when it is determined to be medically necessary based on established clinical criteria. This policy does not apply to Medicare or Medicaid plans.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "CLINICAL CRITERIA\nFor cardiac MRI to be approved the following clinical criteria must be met:\n\u2022 LVEF must be documented and below normal range\n\u2022 Symptoms must be present for minimum 3 months\n\u2022 Prior echocardiogram must be within 12 months\n\u2022 Ordering physician must be board certified cardiologist",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Medical Necessity Criteria\nCardiac MRI is considered medically necessary when all of the following are met:\n1. Patient has documented cardiac diagnosis\n2. LVEF is documented and below 55 percent\n3. Prior echocardiogram results are inconclusive\n4. Ordering physician is a qualified cardiologist",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "COVERAGE CRITERIA\nThe following criteria must be satisfied for approval:\n\u2022 Confirmed diagnosis of cardiomyopathy or heart failure\n\u2022 LVEF documented below 40 percent\n\u2022 Failed minimum 6 weeks of medical management\n\u2022 Specialist evaluation completed",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Clinical Indications\nCardiac MRI is indicated for patients with:\n- Documented cardiomyopathy with reduced ejection fraction\n- Inconclusive echocardiogram results\n- Suspected cardiac sarcoidosis or myocarditis\n- Pre-operative cardiac assessment",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "AUTOMATIC APPROVAL CONDITIONS\nThe following conditions qualify for automatic approval:\n\u2022 LVEF below 40 percent triggers automatic approval\n\u2022 Acute myocardial infarction diagnosis auto approved\n\u2022 Emergency cardiac conditions exempt from standard review",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Bypass Conditions\nAutomatic approval is triggered when:\n1. Patient LVEF is documented below 40 percent\n2. Patient has acute myocardial infarction diagnosis\n3. Emergency cardiovascular condition is present",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "AUTO-APPROVAL CRITERIA\nRequests will be automatically approved when LVEF is below 40 percent or when acute cardiac emergency is documented.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "CONTACT INFORMATION\nFor prior authorization requests contact EviCore at 1-800-397-1630 or visit evicore.com. Requests can be submitted online through the provider portal.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "How to Submit\nPrior authorization requests can be submitted through:\n\u2022 Online portal at uhcprovider.com\n\u2022 Phone: 1-866-889-8054\n\u2022 Fax: 1-866-889-8054\nRequests are reviewed within 2 business days.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "SUBMISSION METHODS\nProviders may submit prior authorization requests via the online portal, phone, or fax. Processing time is typically 3-5 business days.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Authorization Process\nStep 1: Submit request through provider portal\nStep 2: Attach supporting documents\nStep 3: Receive determination within 72 hours\nStep 4: Appeal if denied",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "DENIAL CRITERIA\nRequests will be denied when the following conditions are not met:\n\u2022 No documented cardiac diagnosis\n\u2022 Echocardiogram results are conclusive\n\u2022 Less than 6 weeks of conservative treatment\n\u2022 Not ordered by qualified cardiologist",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Not Medically Necessary\nCardiac MRI is considered not medically necessary for:\n1. Routine screening in asymptomatic patients\n2. Follow-up within 6 months without new symptoms\n3. When echocardiogram results are sufficient",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "APPEAL PROCESS\nIf your prior authorization request is denied you may appeal the decision within 60 days. Submit appeal documentation to the address listed on the denial letter.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "United Healthcare commercial plans require prior authorization for CPT code 75563. The authorization is managed through EviCore healthcare solutions.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Prior authorization is required for cardiac MRI procedures. Requests must be submitted before the service is rendered. Retroactive authorization requests will not be approved.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "This policy is effective January 1 2026 and supersedes all previous versions. Questions regarding this policy should be directed to the provider relations department.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "Cardiac MRI CPT 75563 requires prior authorization for all commercial members. The ordering physician must be a board certified cardiologist or cardiac imaging specialist.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "SITE OF CARE REQUIREMENTS\nHospital outpatient cardiac MRI requires justification if a freestanding imaging center is available within 30 miles of the patient's residence.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "BILLING AND CODING\nUse CPT code 75563 for cardiac MRI with stress imaging and contrast. Modifier 26 applies for professional component only billing.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "EFFECTIVE DATE\nThis policy is effective February 1 2026. All prior authorization requests received after this date must comply with the updated requirements.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "APPLICABLE PLANS\nThis policy applies to fully insured commercial plans. Self-funded plans may have different requirements. Check the member's benefit plan for specific coverage details.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "STEP THERAPY REQUIREMENTS\nPatients must complete minimum 6 weeks of optimal medical therapy before cardiac MRI will be approved for non-emergency cases.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "SPECIALIST REQUIREMENTS\nThe ordering physician must be board certified in cardiology or a related subspecialty. Primary care physicians may not order cardiac MRI without specialist referral.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "COVERAGE LIMITATIONS\nCardiac MRI is limited to once per 12 month period unless significant clinical change is documented. Repeat imaging within 6 months requires additional justification.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "NETWORK REQUIREMENTS\nPrior authorization is required for both in-network and out-of-network cardiac MRI services. Out-of-network services may have higher cost sharing requirements.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "MEMBER NOTIFICATION\nMembers will be notified of the authorization decision within 3 business days of receipt of complete documentation. Urgent requests are processed within 72 hours.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  },
+  {
+    "input": "PROVIDER RESPONSIBILITIES\nProviders are responsible for obtaining prior authorization before rendering services. Failure to obtain authorization may result in claim denial.",
+    "label": "NOT_REQUIRED_DOC_SECTION",
+    "is_required_doc_section": false
+  }
+]

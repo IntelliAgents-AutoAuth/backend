@@ -6,3 +6,14 @@ passlib[bcrypt]
 python-multipart
 pydantic-settings
 sqladmin
+pdfplumber
+pypdfium2
+scikit-learn
+numpy
+transformers
+datasets
+torch
+transformers[torch]
+
+
+
