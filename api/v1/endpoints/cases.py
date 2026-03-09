@@ -7,6 +7,7 @@ from models.user import User
 from core.security import get_current_user
 from api.deps import get_db
 from crud import crud_case
+from services import extraction_service
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -18,7 +19,19 @@ async def create_new_case(
     db: Session = Depends(get_db),
 ):
     """Create a new case with automatic ID and draft status."""
-    return crud_case.create_case(db, case_in=case_in, created_by=current_user.email)
+    db_case = crud_case.create_case(db, case_in=case_in, created_by=current_user.email)
+    
+    # Trigger EHR fetch immediately after creation
+    try:
+        extraction_service.fill_extracted_data_from_ehr(
+            db,
+            patient_id=db_case.patient_id,
+            case_id=db_case.case_id
+        )
+    except Exception as e:
+        print(f"Failed to fetch EHR data for case {db_case.case_id}: {e}")
+        
+    return db_case
 
 
 @router.get("", response_model=List[CaseSchema])
