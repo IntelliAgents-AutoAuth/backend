@@ -1,0 +1,235 @@
+{
+  "run_at": "2026-03-08T23:48:13.283633",
+  "total": 25,
+  "passed": 20,
+  "failed": 5,
+  "errors": 0,
+  "pass_rate": "80.0%",
+  "results": [
+    {
+      "test_id": "TC-001",
+      "test_name": "John Smith - LVEF 35% - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": true,
+      "bypass": true,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-002",
+      "test_name": "LVEF 39% - Just Below Threshold - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": false,
+      "bypass": false,
+      "confidence": 0.6354,
+      "fail_reason": "Expected bypass=True but got bypass=False"
+    },
+    {
+      "test_id": "TC-003",
+      "test_name": "LVEF 20% Severe - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": true,
+      "bypass": true,
+      "confidence": 0.6763,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-004",
+      "test_name": "LVEF 0% Extreme Edge Case - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": true,
+      "bypass": true,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-005",
+      "test_name": "LVEF 40% Boundary - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-006",
+      "test_name": "LVEF 55% Normal - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-007",
+      "test_name": "LVEF 41% - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-008",
+      "test_name": "No LVEF Provided - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-009",
+      "test_name": "Aetna - LVEF 35% - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": false,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": "Expected bypass=True but got bypass=False"
+    },
+    {
+      "test_id": "TC-010",
+      "test_name": "Cigna - LVEF 35% - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": false,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": "Expected bypass=True but got bypass=False"
+    },
+    {
+      "test_id": "TC-011",
+      "test_name": "Humana - LVEF 35% - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": false,
+      "bypass": false,
+      "confidence": 0.8851,
+      "fail_reason": "Expected bypass=True but got bypass=False"
+    },
+    {
+      "test_id": "TC-012",
+      "test_name": "Blue Cross Blue Shield - LVEF 35% - BYPASS",
+      "expected": "BYPASS_TRIGGERED",
+      "passed": false,
+      "bypass": false,
+      "confidence": 0.9272,
+      "fail_reason": "Expected bypass=True but got bypass=False"
+    },
+    {
+      "test_id": "TC-013",
+      "test_name": "Lumbar MRI - No LVEF - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 0.9474,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-014",
+      "test_name": "CGM Type 2 Diabetes - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 0.827,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-015",
+      "test_name": "Botox Chronic Migraine - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 0.8648,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-016",
+      "test_name": "Total Knee Replacement - NO BYPASS",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 0.9511,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-017",
+      "test_name": "Response Has Required Documents",
+      "expected": "HAS_REQUIRED_DOCS",
+      "passed": true,
+      "bypass": true,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-018",
+      "test_name": "Response Has Clinical Criteria",
+      "expected": "HAS_CLINICAL_CRITERIA",
+      "passed": true,
+      "bypass": true,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-019",
+      "test_name": "Response Has Confidence Score",
+      "expected": "HAS_CONFIDENCE",
+      "passed": true,
+      "bypass": true,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-020",
+      "test_name": "PA Required Always True for Cardiac MRI",
+      "expected": "PA_REQUIRED_TRUE",
+      "passed": true,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-021",
+      "test_name": "LVEF Negative Value Edge Case",
+      "expected": "BYPASS_OR_ERROR",
+      "passed": true,
+      "bypass": true,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-022",
+      "test_name": "LVEF 100% Maximum Value",
+      "expected": "NO_BYPASS",
+      "passed": true,
+      "bypass": false,
+      "confidence": 1.0,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-023",
+      "test_name": "Empty Payer String",
+      "expected": "RETURNS_RESULT",
+      "passed": true,
+      "bypass": false,
+      "confidence": 0.9436,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-024",
+      "test_name": "Empty CPT Code",
+      "expected": "RETURNS_RESULT",
+      "passed": true,
+      "bypass": true,
+      "confidence": 0.9574,
+      "fail_reason": ""
+    },
+    {
+      "test_id": "TC-025",
+      "test_name": "Confidence Score Between 0 and 1",
+      "expected": "CONFIDENCE_VALID",
+      "passed": true,
+      "bypass": true,
+      "confidence": 1.0,
+      "fail_reason": ""
+    }
+  ]
+}

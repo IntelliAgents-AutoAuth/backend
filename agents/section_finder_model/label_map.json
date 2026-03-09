@@ -1,0 +1,10 @@
+{
+  "labels": {
+    "NOT_REQUIRED_DOC_SECTION": 0,
+    "REQUIRED_DOC_SECTION": 1
+  },
+  "id2label": {
+    "0": "NOT_REQUIRED_DOC_SECTION",
+    "1": "REQUIRED_DOC_SECTION"
+  }
+}

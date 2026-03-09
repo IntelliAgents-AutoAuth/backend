@@ -25,6 +25,11 @@ venv.bak/
 
 # Logs
 *.log
+logs/
+
+# trained model checkpoints
+**/checkpoint-*/
+**/section_finder_model/checkpoint-*/
 
 # Unnecessary Python files
 __init__.py
