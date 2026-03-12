@@ -9,7 +9,6 @@ from sqladmin import Admin, ModelView
 from models.user import User
 from models.ehr_records import EHR
 from models.cases import Case
-from models.extracted_data import ExtractedData
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -47,17 +46,10 @@ class EHRAdmin(ModelView, model=EHR):
     column_sortable_list = [EHR.created_at]
     icon = "fa-solid fa-hospital-user"
 
-class ExtractedDataAdmin(ModelView, model=ExtractedData):
-    column_list = [ExtractedData.case_id, ExtractedData.patient_id, ExtractedData.confidence_overall, ExtractedData.created_at]
-    column_searchable_list = [ExtractedData.case_id, ExtractedData.patient_id]
-    column_sortable_list = [ExtractedData.created_at]
-    icon = "fa-solid fa-microscope"
-
 admin = Admin(app, engine)
 admin.add_view(UserAdmin)
 admin.add_view(CaseAdmin)
 admin.add_view(EHRAdmin)
-admin.add_view(ExtractedDataAdmin)
 
 # Set all CORS enabled origins
 app.add_middleware(
