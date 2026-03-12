@@ -59,10 +59,7 @@ This document provides a clear overview of the backend codebase, its modular arc
 - **Spring Boot Equivalent**: `@Service`
 - **Responsibility**: Core logic for deterministic processing (e.g., EHR Query, Policy Fetch).
 
-**agents**
-- **What It Means**: AI Reasoning Layer
-- **Spring Boot Equivalent**: *(N/A)*
-- **Responsibility**: Specialized AI modules for analysis (Extraction, Gatekeeper, Appeals).
+> ⚠️ **AI/agents removed** – previous versions included an `agents/` package containing BERT and other logic; this folder is now deleted. The backend currently focuses on core services and the Login/Cases endpoints. LLM integration is planned for future development.
 
 **orchestrator**
 - **What It Means**: Process Coordination
