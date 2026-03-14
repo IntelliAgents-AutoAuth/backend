@@ -5,6 +5,7 @@ This module provides helpers to fetch EHR-related data from the local database.
 
 from typing import Any, Dict, Optional
 
+from langchain_core.tools import tool
 from crud.crud_extracted_data import get_extracted_data
 from db.session import SessionLocal
 from schemas.extracted_data import ExtractedData as ExtractedDataSchema
@@ -27,3 +28,6 @@ def fetch_extracted_data_by_case(case_id: str) -> Optional[Dict[str, Any]]:
 
         # Use the Pydantic schema to serialize the SQLAlchemy model cleanly.
         return ExtractedDataSchema.from_orm(db_obj).model_dump()
+
+# Tool for use in LangChain agents
+ehr_fetcher = tool(fetch_extracted_data_by_case)

@@ -1,6 +1,5 @@
 from langchain_core.tools import tool
 
-@tool
 def gap_validator(required_docs: list, available_docs: list) -> dict:
     """
     Tool 3 — Compares required docs vs
@@ -32,3 +31,6 @@ def gap_validator(required_docs: list, available_docs: list) -> dict:
         "unmatched_required": unmatched,
         "needs_llm": len(unmatched) > 0
     }
+
+# Tool for use in LangChain agents
+gap_validator_tool = tool(gap_validator)

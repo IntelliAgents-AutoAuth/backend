@@ -1,18 +1,26 @@
 import os
 import sys
-from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.memory import ConversationBufferMemory
-from langchain.agents import AgentExecutor, create_openai_functions_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 # Add the backend directory to sys.path to ensure local imports work
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# This must happen before any local imports
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# Use the 'langchain_classic' package for core components in this environment
+from langchain_classic.agents import AgentExecutor
+from langchain_classic.agents import create_openai_functions_agent
+from langchain_classic.memory import ConversationBufferMemory
+
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from prompts.gap_analysis_prompts import SYSTEM_PROMPT
 from tools.ehr_fetcher import ehr_fetcher
 from tools.pdf_extractor import pdf_extractor
-from tools.gap_validator import gap_validator
+from tools.gap_validator import gap_validator_tool
 
 # ─────────────────────────────────────────
 # 1. ENVIRONMENT
@@ -54,7 +62,7 @@ memory = ConversationBufferMemory(
 tools = [
     ehr_fetcher,
     pdf_extractor,
-    gap_validator
+    gap_validator_tool
 ]
 
 # ─────────────────────────────────────────

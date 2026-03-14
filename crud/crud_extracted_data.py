@@ -1,3 +1,8 @@
+import os
+import sys
+# Add the parent directory (backend) to the Python path so it can find 'models' and 'schemas'
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from sqlalchemy.orm import Session
 from models.extracted_data import ExtractedData
 from schemas.extracted_data import ExtractedDataCreate, ExtractedDataUpdate

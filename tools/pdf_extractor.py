@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 
+from langchain_core.tools import tool
 from typing import Optional
 
 
@@ -47,3 +48,6 @@ def extract_raw_text(pdf_path: str) -> str:
 
     except Exception as exc:
         raise RuntimeError(f"Failed to extract text from PDF: {exc}") from exc
+
+# Tool for use in LangChain agents
+pdf_extractor = tool(extract_raw_text)

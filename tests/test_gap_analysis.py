@@ -2,9 +2,10 @@ import os
 import sys
 
 # Ensure the backend directory is in sys.path for local imports
+# This MUST be at the very top before other local imports
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
-    sys.path.append(backend_dir)
+    sys.path.insert(0, backend_dir)
 
 from tools.ehr_fetcher import fetch_extracted_data_by_case
 from tools.pdf_extractor import extract_raw_text
