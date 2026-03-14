@@ -7,7 +7,7 @@ from models.user import User
 from core.security import get_current_user
 from api.deps import get_db
 from crud import crud_case
-from services import extraction_service
+
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
