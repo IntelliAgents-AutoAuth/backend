@@ -6,14 +6,14 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.append(backend_dir)
 
-from tools.ehr_fetcher import ehr_fetcher
-from tools.pdf_extractor import pdf_extractor
+from tools.ehr_fetcher import fetch_extracted_data_by_case
+from tools.pdf_extractor import extract_raw_text
 from agents.gap_analysis_agent import run_gap_analysis
 
 def test_ehr_fetcher():
     print("\n--- Testing ehr_fetcher ---")
     case_id = "CASE_001"
-    result = ehr_fetcher.invoke({"case_id": case_id})
+    result = fetch_extracted_data_by_case(case_id)
     print(f"Result for {case_id}:")
     print(result)
     return result
@@ -27,7 +27,7 @@ def test_pdf_extractor():
     
     if os.path.exists(pdf_path):
         print(f"Extracting from: {pdf_path}")
-        result = pdf_extractor.invoke({"pdf_path": pdf_path})
+        result = extract_raw_text(pdf_path)
         print(f"Extracted Text (first 200 chars):")
         print(result[:200] + "...")
     else:
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     print("Starting Gap Analysis Tests...")
     
     # 1. Test EHR Fetcher
-    test_ehr_fetcher()
+    #test_ehr_fetcher()
     
     # 2. Test PDF Extractor
     test_pdf_extractor()
