@@ -47,7 +47,7 @@ def get_agent_executor():
 
     # 2. LLM
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash", 
+        model="gemini-2.5-flash-lite", 
         temperature=0,
         google_api_key=api_key
     )

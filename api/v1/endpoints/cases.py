@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 import traceback
 from typing import List
 from sqlalchemy.orm import Session
@@ -10,12 +10,11 @@ from api.deps import get_db
 from crud import crud_case
 from services.extraction_service import fill_extracted_data_from_ehr
 from agents.gap_analysis_agent import run_gap_analysis
+from agents.eligibility_agent import run_eligibility_check
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
-
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 
 @router.post("", response_model=CaseSchema)
 async def create_new_case(
@@ -116,3 +115,49 @@ async def sync_case_ehr(
         )
         
     return db_case
+
+
+@router.post("/{case_id}/eligibility")
+async def check_case_eligibility(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run the Eligibility Agent for a specific case.
+
+    Fetches the patient's EHR record and compares it against the policy PDF
+    to determine whether the patient is eligible for the claim.
+
+    Returns:
+        {
+            "case_id": str,
+            "eligible": bool,
+            "verdict": "ELIGIBLE" | "NOT_ELIGIBLE",
+            "reason": str
+        }
+    """
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found",
+        )
+
+    try:
+        print(f"[cases_endpoint] Running eligibility check for case: {case_id}...")
+        result = run_eligibility_check({
+            "case_id": case_id,
+            "pdf_path": None,  # uses default policy PDF
+        })
+        print(
+            f"[cases_endpoint] Eligibility result for {case_id}: "
+            f"{result.get('verdict')} — {result.get('reason', '')[:80]}..."
+        )
+        return result
+    except Exception as e:
+        print(f"[cases_endpoint] Eligibility check failed for {case_id}: {e}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Eligibility check failed: {type(e).__name__}: {e}",
+        )
