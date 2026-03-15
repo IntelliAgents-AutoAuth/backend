@@ -59,7 +59,7 @@ def test_gemini_llm():
     import os
     from dotenv import load_dotenv
 
-    load_dotenv()
+    load_dotenv(os.path.join(backend_dir, ".env"))
     api_key = os.getenv("GOOGLE_API_KEY")
 
     if not api_key:

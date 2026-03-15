@@ -23,78 +23,69 @@ from tools.pdf_extractor import pdf_extractor
 from tools.gap_validator import gap_validator_tool
 
 # ─────────────────────────────────────────
-# 1. ENVIRONMENT
+# 1. ENVIRONMENT & SINGLETONS
 # ─────────────────────────────────────────
 
 # Load environment variables from the backend directory
 load_dotenv(os.path.join(backend_dir, ".env"))
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# ─────────────────────────────────────────
-# 2. LLM
-# ─────────────────────────────────────────
+_agent_executor = None
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
-    temperature=0,
-    google_api_key=GOOGLE_API_KEY
-)
+def get_agent_executor():
+    """Lazy initialization of the agent executor to avoid crashes on import."""
+    global _agent_executor
+    if _agent_executor is not None:
+        return _agent_executor
 
-# ─────────────────────────────────────────
-# 3. MEMORY
-# ─────────────────────────────────────────
+    # Load environment variables here, just before they are needed for the LLM
+    # This ensures .env is loaded only when the agent is first accessed.
+    load_dotenv(os.path.join(backend_dir, ".env"))
 
-memory = ConversationBufferMemory(
-    memory_key="chat_history",
-    return_messages=True,
-    input_key="input"
-)
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        print("[gap_analysis_agent] WARNING: GOOGLE_API_KEY is not set.")
 
-# ─────────────────────────────────────────
-# 4. TOOLS (imported)
-# ─────────────────────────────────────────
+    # 2. LLM
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash", 
+        temperature=0,
+        google_api_key=api_key
+    )
 
-# Tools are imported from external modules in the tools/ directory.
+    # 3. MEMORY
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        return_messages=True,
+        input_key="input"
+    )
 
+    # 4. TOOLS
+    tools = [
+        ehr_fetcher,
+        pdf_extractor,
+        gap_validator_tool
+    ]
 
-# ─────────────────────────────────────────
-# 5. ALL TOOLS LIST
-# ─────────────────────────────────────────
+    # 5. PROMPT
+    prompt = get_gap_analysis_prompt()
 
-tools = [
-    ehr_fetcher,
-    pdf_extractor,
-    gap_validator_tool
-]
+    # 6. AGENT
+    agent = create_structured_chat_agent(
+        llm=llm,
+        tools=tools,
+        prompt=prompt
+    )
 
-# ─────────────────────────────────────────
-# 6. PROMPT TEMPLATE
-# ─────────────────────────────────────────
-
-prompt = get_gap_analysis_prompt()
-
-# ─────────────────────────────────────────
-# 7. AGENT
-# ─────────────────────────────────────────
-
-agent = create_structured_chat_agent(
-    llm=llm,
-    tools=tools,
-    prompt=prompt
-)
-
-# ─────────────────────────────────────────
-# 8. AGENT EXECUTOR (orchestrator)
-# ─────────────────────────────────────────
-
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    memory=memory,
-    max_iterations=6,        # max 6 retries
-    verbose=True,            # shows every step
-    handle_parsing_errors=True
-)
+    # 7. EXECUTOR
+    _agent_executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        memory=memory,
+        max_iterations=6,
+        verbose=True,
+        handle_parsing_errors=True
+    )
+    return _agent_executor
 
 # ─────────────────────────────────────────
 # 9. RUN AGENT — call this from FastAPI
@@ -128,8 +119,9 @@ def run_gap_analysis(props: dict) -> dict:
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         pdf_path = os.path.join(backend_dir, default_dir, default_filename)
 
-    # Invoke agent with structured props
-    result = agent_executor.invoke({
+    # Invoke agent with structured props using lazy initialization
+    agent_exec = get_agent_executor()
+    result = agent_exec.invoke({
         "case_id": case_id,
         "patient_name": patient_name,
         "pdf_path": pdf_path,

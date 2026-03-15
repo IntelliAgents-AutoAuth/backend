@@ -15,33 +15,39 @@ from agents.gap_analysis_agent import run_gap_analysis
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+
 @router.post("", response_model=CaseSchema)
 async def create_new_case(
     case_in: CaseCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a new case with automatic ID and draft status."""
     db_case = crud_case.create_case(db, case_in=case_in, created_by=current_user.email)
     
-    # Trigger EHR fetch immediately after creation
+    # 1. Trigger EHR fetch immediately (Synchronous, fast)
     try:
         fill_extracted_data_from_ehr(
             db,
             patient_id=db_case.patient_id,
             case_id=db_case.case_id
         )
-        # Also trigger Gap Analysis
-        print(f"[cases_endpoint] Triggering Gap Analysis for case: {db_case.case_id}...")
-        gap_result = run_gap_analysis({
-            "case_id": db_case.case_id,
-            "patient_name": f"Patient {db_case.patient_id}", # We might want real name here
-            "pdf_path": None # Uses default
-        })
-        print(f"[cases_endpoint] Gap Analysis triggered. Result output: {gap_result.get('output', 'No output')[:100]}...")
     except Exception as e:
-        print(f"[cases_endpoint] Failed to trigger initial processing for case {db_case.case_id}: {e}")
+        print(f"[cases_endpoint] Failed to fetch EHR data for case {db_case.case_id}: {e}")
         traceback.print_exc()
+
+    # 2. Trigger Gap Analysis in Background (Asynchronous, slow/LLM)
+    # We pass properties needed for the agent
+    agent_props = {
+        "case_id": db_case.case_id,
+        "patient_name": f"Patient {db_case.patient_id}",
+        "pdf_path": None # Uses default if not provided
+    }
+    
+    print(f"[cases_endpoint] Scheduling background Gap Analysis for: {db_case.case_id}...")
+    background_tasks.add_task(run_gap_analysis, agent_props)
         
     return db_case
 
