@@ -118,11 +118,13 @@ async def run_gap_analysis(props: dict) -> dict:
       }
     """
     case_id      = props.get("case_id")
-    pdf_path     = props.get("pdf_path")
+    pdf_path     =  os.path.join(
+            backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
+        )
     patient_name = props.get("patient_name", "Unknown")
 
     # ── Default PDF for demo/testing ─────────
-    if not pdf_path:
+    if not pdf_path or not os.path.exists(pdf_path):
         pdf_path = os.path.join(
             backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
         )
