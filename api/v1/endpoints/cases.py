@@ -7,6 +7,7 @@ from models.user import User
 from core.security import get_current_user
 from api.deps import get_db
 from crud import crud_case
+from services.extraction_service import fill_extracted_data_from_ehr
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -23,7 +24,7 @@ async def create_new_case(
     
     # Trigger EHR fetch immediately after creation
     try:
-        extraction_service.fill_extracted_data_from_ehr(
+        fill_extracted_data_from_ehr(
             db,
             patient_id=db_case.patient_id,
             case_id=db_case.case_id
