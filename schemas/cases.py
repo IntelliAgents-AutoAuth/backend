@@ -21,7 +21,22 @@ class Case(BaseModel):
     cpt_code: Optional[str] = None
     icd10_code: Optional[str] = None
     gap_result: Optional[Dict[str, Any]] = None
+    total_required: Optional[int] = None
+    total_matched: Optional[int] = None
+    total_missing: Optional[int] = None
+    gap_percentage: Optional[float] = None
     uploaded_files: Optional[List[Dict[str, Any]]] = None
+    # EHR Fields (Merged from ExtractedData)
+    patient_name: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    gender: Optional[str] = None
+    physician_name: Optional[str] = None
+    physician_npi: Optional[str] = None
+    physician_specialty: Optional[str] = None
+    facility_name: Optional[str] = None
+    diagnosis: Optional[str] = None
+    procedure_name: Optional[str] = None
+    lab_results: Optional[Dict[str, Any]] = None
     audit_log: List[Dict[str, Any]]
 
     class Config:

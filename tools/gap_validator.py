@@ -1,39 +1,66 @@
 from langchain_core.tools import tool
 
+
 def gap_validator(required_docs: list, available_docs: list) -> dict:
     """
-    Tool 3 — Compares required docs vs available docs. 
-    Plain Python first, returns unmatched items for LLM semantic matching.
+    Tool 3 — Compares required docs vs available docs.
+
+    Step 1 → Plain Python exact/partial match (free, instant)
+    Step 2 → Returns unmatched items so LLM can do semantic matching
+
+    Input:
+      required_docs  → list of strings from PDF extraction
+                       e.g. ["echocardiogram report", "lab results"]
+
+      available_docs → list of dicts or strings from EHR
+                       e.g. [{"name": "echo_report", "date": "2024-01-15"}]
+                       or   ["echo_report", "BNP_lab_test"]
+
+    Output:
+      {
+        "matched":            [ {required, matched_to, type} ],
+        "unmatched_required": [ "doc1", "doc2" ],
+        "needs_llm":          true | false
+      }
     """
-    matched = []
+    matched   = []
     unmatched = []
 
     for required in required_docs:
+
+        # normalise required name
+        req_lower = required.lower().strip()
         found = False
+
         for ehr in available_docs:
-            # Handle both dicts with "name" and simple strings
-            if isinstance(ehr, dict) and "name" in ehr:
-                ehr_name = ehr["name"]
+
+            # handle dict or plain string
+            if isinstance(ehr, dict):
+                ehr_name = ehr.get("name", "") or ehr.get("document_name", "")
             else:
                 ehr_name = str(ehr)
 
-            if (required.lower() in ehr_name.lower() or
-                    ehr_name.lower() in required.lower()):
+            ehr_lower = ehr_name.lower().strip()
+
+            # exact or partial match
+            if req_lower in ehr_lower or ehr_lower in req_lower:
                 matched.append({
-                    "required": required,
+                    "required":   required,
                     "matched_to": ehr_name,
-                    "type": "EXACT"
+                    "type":       "EXACT"
                 })
                 found = True
                 break
+
         if not found:
             unmatched.append(required)
 
     return {
-        "matched": matched,
+        "matched":            matched,
         "unmatched_required": unmatched,
-        "needs_llm": len(unmatched) > 0
+        "needs_llm":          len(unmatched) > 0
     }
 
-# Tool for use in LangChain agents
+
+# Register as LangChain tool
 gap_validator_tool = tool(gap_validator)

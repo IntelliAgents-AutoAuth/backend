@@ -50,5 +50,6 @@ def fill_extracted_data_from_ehr(db: Session, patient_id: str, case_id: str) -> 
         ehr_filled_at=datetime.now(timezone.utc),
     )
 
+    print(f"[extraction_service] --- Data Extraction Started for {case_id} ---")
     create_extracted_data(db, payload)
-    print(f"[extraction_service] Populated extracted_data for case_id={case_id!r} from EHR.")
+    print(f"[extraction_service] --- Data Extraction Completed for {case_id} ---")
