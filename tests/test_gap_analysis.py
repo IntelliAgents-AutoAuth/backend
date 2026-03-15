@@ -49,7 +49,7 @@ def test_run_gap_analysis():
         print("Final Agent Response:")
         print(result)
     except Exception as e:
-        print(f"Agent run failed (likely missing/invalid API key): {e}")
+        print(f"Agent run failed: {e}")
 
 def test_gemini_llm():
     """Directly test if Gemini LLM is connected and responding via LangChain."""
