@@ -17,7 +17,7 @@ from langchain_classic.memory import ConversationBufferMemory
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from prompts.gap_analysis_prompts import SYSTEM_PROMPT
+from prompts.gap_analysis_prompts import get_gap_analysis_prompt
 from tools.ehr_fetcher import ehr_fetcher
 from tools.pdf_extractor import pdf_extractor
 from tools.gap_validator import gap_validator_tool
@@ -45,7 +45,8 @@ llm = ChatGoogleGenerativeAI(
 
 memory = ConversationBufferMemory(
     memory_key="chat_history",
-    return_messages=True
+    return_messages=True,
+    input_key="input"
 )
 
 # ─────────────────────────────────────────
@@ -69,12 +70,7 @@ tools = [
 # 6. PROMPT TEMPLATE
 # ─────────────────────────────────────────
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", f"{SYSTEM_PROMPT}\n\nYou have access to the following tools:\n{{tools}}\n\nUse a json blob to specify a tool by providing an action key (tool name) and an action_input key (tool input).\n\nValid \"action\" values: \"Final Answer\" or {{tool_names}}\n\nFollow this format:\n\nQuestion: input question to answer\nThought: consider previous and subsequent steps\nAction:\n```\n$JSON_BLOB\n```\nObservation: action result\n... (repeat Thought/Action/Observation N times)\nThought: I know the final answer\nAction:\n```\n{{\n  \"action\": \"Final Answer\",\n  \"action_input\": \"final answer to human\"\n}}\n```\n\nBegin!"),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad")
-])
+prompt = get_gap_analysis_prompt()
 
 # ─────────────────────────────────────────
 # 7. AGENT
@@ -94,7 +90,7 @@ agent_executor = AgentExecutor(
     agent=agent,
     tools=tools,
     memory=memory,
-    max_iterations=3,        # max 3 retries
+    max_iterations=6,        # max 6 retries
     verbose=True,            # shows every step
     handle_parsing_errors=True
 )
@@ -103,37 +99,40 @@ agent_executor = AgentExecutor(
 # 9. RUN AGENT — call this from FastAPI
 # ─────────────────────────────────────────
 
-def run_gap_analysis(case_id: str, pdf_path: str | None = None) -> dict:
+def run_gap_analysis(props: dict) -> dict:
     """
     Main function — call this from FastAPI endpoint.
     
     Input:
-      case_id  → from cases table
-      pdf_path → uploaded PDF path (optional)
+      props = {
+        "case_id": str,
+        "patient_name": str,
+        "pdf_path": str (optional)
+      }
     
     Output:
       {
-        status: GAP_FOUND / GAP_CLEARED,
-        missing_docs: [...],
-        matched_docs: [...]
+        "case_id": str,
+        "output": str
       }
     """
+    case_id = props.get("case_id")
+    pdf_path = props.get("pdf_path")
+    patient_name = props.get("patient_name", "Unknown")
+
     # Default PDF path for testing/demo if none provided
     if not pdf_path:
         default_dir = os.path.join("policy-pdfs", "aetna")
         default_filename = "test_doc.pdf"
-        # Search for the full path
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         pdf_path = os.path.join(backend_dir, default_dir, default_filename)
 
+    # Invoke agent with structured props
     result = agent_executor.invoke({
-        "input": f"""
-        Process gap analysis for:
-        Case ID: {case_id}
-        PDF Path: {pdf_path or 'None'}
-        
-        Find all missing documents.
-        """
+        "case_id": case_id,
+        "patient_name": patient_name,
+        "pdf_path": pdf_path,
+        "input": "Initiate gap analysis based on the provided case details."
     })
 
     return {

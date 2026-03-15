@@ -39,15 +39,13 @@ def test_run_gap_analysis():
     print("\n--- Testing run_gap_analysis (Full Agent Run) ---")
     print("Note: This requires a valid GOOGLE_API_KEY in .env")
     try:
-        case_id = "CASE_001"
-        result = run_gap_analysis(case_id=case_id, pdf_path="hi")
-        # Overriding the input inside run_gap_analysis for this specific test if needed,
-        # but let's just use the function as is and pass 'hi' if it supports it.
-        # Wait, run_gap_analysis takes case_id and pdf_path.
-        # I'll modify test_run_gap_analysis to just invoke the executor directly with "hi" for speed.
-        from agents.gap_analysis_agent import agent_executor
-        print("Sending simple 'hi' to agent...")
-        result = agent_executor.invoke({"input": "hi"})
+        case_id = "PA-20260309-00002"
+        test_props = {
+            "case_id": case_id,
+            "patient_name": "Test User",
+            "pdf_path": None
+        }
+        result = run_gap_analysis(test_props)
         print("Final Agent Response:")
         print(result)
     except Exception as e:
