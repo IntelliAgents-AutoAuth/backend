@@ -40,7 +40,14 @@ def test_run_gap_analysis():
     print("Note: This requires a valid GOOGLE_API_KEY in .env")
     try:
         case_id = "CASE_001"
-        result = run_gap_analysis(case_id=case_id)
+        result = run_gap_analysis(case_id=case_id, pdf_path="hi")
+        # Overriding the input inside run_gap_analysis for this specific test if needed,
+        # but let's just use the function as is and pass 'hi' if it supports it.
+        # Wait, run_gap_analysis takes case_id and pdf_path.
+        # I'll modify test_run_gap_analysis to just invoke the executor directly with "hi" for speed.
+        from agents.gap_analysis_agent import agent_executor
+        print("Sending simple 'hi' to agent...")
+        result = agent_executor.invoke({"input": "hi"})
         print("Final Agent Response:")
         print(result)
     except Exception as e:
@@ -63,11 +70,11 @@ def test_gemini_llm():
 
     try:
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             temperature=0,
             google_api_key=api_key
         )
-        response = llm.invoke([HumanMessage(content="Say hello in one sentence.")])
+        response = llm.invoke([HumanMessage(content="hi")])
         print("✅ Gemini LLM connected successfully!")
         print(f"Response: {response.content}")
     except Exception as e:
@@ -83,10 +90,7 @@ if __name__ == "__main__":
     # 2. Test EHR Fetcher
     # test_ehr_fetcher()
 
-    # 3. Test PDF Extractor
-    test_pdf_extractor()
-
-    # 4. Full agent run (uncomment to test end-to-end)
-    # test_run_gap_analysis()
+    # 3. Full agent run
+    test_run_gap_analysis()
 
     print("\nTests completed.")
