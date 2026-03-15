@@ -11,6 +11,8 @@ langchain-community
 langchain-google-genai
 langchain-openai
 pdfplumber
+reportlab
+pypdf
 python-dotenv
 
 

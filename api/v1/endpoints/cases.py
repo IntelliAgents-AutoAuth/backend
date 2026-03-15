@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi.responses import FileResponse
 import traceback
 from typing import List
 from sqlalchemy.orm import Session
@@ -11,6 +12,8 @@ from crud import crud_case
 from services.extraction_service import fill_extracted_data_from_ehr
 from agents.gap_analysis_agent import run_gap_analysis
 from agents.eligibility_agent import run_eligibility_check
+from agents.pa_document_agent import generate_pa_content
+from services.pdf_generator import generate_pa_pdf
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -160,4 +163,67 @@ async def check_case_eligibility(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Eligibility check failed: {type(e).__name__}: {e}",
+        )
+
+
+@router.post("/{case_id}/generate-document")
+async def generate_pa_document(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a complete Prior Authorization PDF package for a case.
+
+    Sections:
+      1. Cover Letter       — LLM-written medical necessity letter
+      2. Clinical Summary   — LLM-generated patient narrative
+      3. Checklist          — every insurance requirement, ticked with evidence
+      4. Attached Documents — all uploaded files merged in
+
+    Returns the PDF as a file download.
+    """
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found",
+        )
+
+    # Resolve uploaded file paths stored on the case
+    uploaded_paths = []
+    if db_case.uploaded_files:
+        import os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        )))
+        for f in db_case.uploaded_files:
+            path = f.get("path") or f.get("file_path") or ""
+            if path and os.path.exists(path):
+                uploaded_paths.append(path)
+
+    try:
+        print(f"[cases_endpoint] Generating PA document for case: {case_id}...")
+
+        # 1. LLM generates content
+        content = generate_pa_content(case_id=case_id, pdf_path=None)
+
+        # 2. PDF builder assembles the package
+        pdf_path = generate_pa_pdf(
+            case_id=case_id,
+            content=content,
+            uploaded_file_paths=uploaded_paths,
+        )
+
+        print(f"[cases_endpoint] PA document ready: {pdf_path}")
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=f"PA_Package_{case_id}.pdf",
+        )
+    except Exception as e:
+        print(f"[cases_endpoint] Document generation failed for {case_id}: {e}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document generation failed: {type(e).__name__}: {e}",
         )
