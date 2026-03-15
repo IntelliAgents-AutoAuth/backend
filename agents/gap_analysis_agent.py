@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Use the 'langchain_classic' package for core components in this environment
 from langchain_classic.agents import AgentExecutor
-from langchain_classic.agents import create_openai_functions_agent
+from langchain_classic.agents import create_structured_chat_agent
 from langchain_classic.memory import ConversationBufferMemory
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -70,7 +70,7 @@ tools = [
 # ─────────────────────────────────────────
 
 prompt = ChatPromptTemplate.from_messages([
-    ("system", SYSTEM_PROMPT),
+    ("system", f"{SYSTEM_PROMPT}\n\nYou have access to the following tools:\n{{tools}}\n\nUse a json blob to specify a tool by providing an action key (tool name) and an action_input key (tool input).\n\nValid \"action\" values: \"Final Answer\" or {{tool_names}}\n\nFollow this format:\n\nQuestion: input question to answer\nThought: consider previous and subsequent steps\nAction:\n```\n$JSON_BLOB\n```\nObservation: action result\n... (repeat Thought/Action/Observation N times)\nThought: I know the final answer\nAction:\n```\n{{\n  \"action\": \"Final Answer\",\n  \"action_input\": \"final answer to human\"\n}}\n```\n\nBegin!"),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}"),
     MessagesPlaceholder(variable_name="agent_scratchpad")
@@ -80,7 +80,7 @@ prompt = ChatPromptTemplate.from_messages([
 # 7. AGENT
 # ─────────────────────────────────────────
 
-agent = create_openai_functions_agent(
+agent = create_structured_chat_agent(
     llm=llm,
     tools=tools,
     prompt=prompt
