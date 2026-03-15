@@ -10,7 +10,11 @@ from models.user import User
 from models.ehr_records import EHR
 from models.cases import Case
 
-# Create tables
+# Run migrations to update existing tables
+from scripts.migrate_db import migrate
+migrate()
+
+# Create tables (for new installations)
 Base.metadata.create_all(bind=engine)
 
 # Initialize DB with mock data

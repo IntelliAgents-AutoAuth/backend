@@ -44,7 +44,7 @@ def extract_raw_text(pdf_path: str) -> str:
                 text = page.extract_text() or ""
                 texts.append(text)
 
-        return "\n".join(texts)
+        return "\n\n".join(texts)
 
     except Exception as exc:
         raise RuntimeError(f"Failed to extract text from PDF: {exc}") from exc

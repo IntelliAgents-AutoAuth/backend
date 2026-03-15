@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from datetime import datetime
 from fastapi.responses import FileResponse
 import traceback
 from typing import List
@@ -9,6 +10,7 @@ from models.user import User
 from core.security import get_current_user
 from api.deps import get_db
 from crud import crud_case
+from crud.crud_extracted_data import get_extracted_data
 from services.extraction_service import fill_extracted_data_from_ehr
 from agents.gap_analysis_agent import run_gap_analysis
 from agents.eligibility_agent import run_eligibility_check
@@ -17,6 +19,36 @@ from services.pdf_generator import generate_pa_pdf
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
+
+
+def merge_ehr_data_into_case(db: Session, db_case: Case):
+    """Augment the case object with data from extracted_data table for cleaner frontend display."""
+    ext_data = get_extracted_data(db, db_case.case_id)
+    if not ext_data:
+        return db_case
+    
+    # Map fields from ExtractedData to Case (Pydantic schema handles display)
+    db_case.patient_name = f"{ext_data.patient_first_name or ''} {ext_data.patient_last_name or ''}".strip() or None
+    # Handle date conversion if needed, otherwise just pass through
+    db_case.date_of_birth = str(ext_data.patient_dob) if ext_data.patient_dob else None
+    db_case.gender = ext_data.patient_gender
+    db_case.physician_name = ext_data.physician_name
+    db_case.physician_npi = ext_data.physician_npi
+    db_case.physician_specialty = ext_data.physician_specialty
+    db_case.facility_name = ext_data.facility_name
+    db_case.diagnosis = ext_data.primary_diagnosis
+    
+    # Lab results mapping
+    db_case.lab_results = ext_data.lab_results
+    
+    # Fallback for empty case fields
+    if not db_case.cpt_code:
+        db_case.cpt_code = ext_data.cpt_code
+    if not db_case.icd10_code:
+        db_case.icd10_code = ext_data.primary_icd10_code
+        
+    return db_case
+
 
 
 @router.post("", response_model=CaseSchema)
@@ -48,7 +80,7 @@ async def create_new_case(
         "pdf_path": None # Uses default if not provided
     }
     
-    print(f"[cases_endpoint] Scheduling background Gap Analysis for: {db_case.case_id}...")
+    print(f"[api] Scheduling Background Analysis: {db_case.case_id}")
     background_tasks.add_task(run_gap_analysis, agent_props)
         
     return db_case
@@ -77,7 +109,58 @@ async def get_case_details(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Case with ID {case_id} not found"
         )
-    return db_case
+    return merge_ehr_data_into_case(db, db_case)
+
+@router.get("/{case_id}/gap-analysis")
+async def get_case_gap_analysis(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve the stored Gap Analysis result for a case."""
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found"
+        )
+    
+    return db_case.gap_result or {"status": "NOT_STARTED", "message": "Analysis in progress or not yet triggered."}
+
+
+@router.post("/{case_id}/upload")
+async def upload_case_document(
+    case_id: str,
+    file_info: dict, # Expected: {"document_name": "...", "file_path": "...", "missing_key": "..."}
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Simulate document upload by adding info to the case record."""
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found"
+        )
+    
+    files = db_case.uploaded_files or []
+    files.append({
+        "document_name": file_info.get("document_name"),
+        "file_path": file_info.get("file_path"),
+        "field_value": file_info.get("field_value"), # New: store actual data value if it's not a file
+        "missing_key": file_info.get("missing_key"), # The ID/Key of the missing doc this satisfies
+        "uploaded_at": datetime.now().isoformat(),
+        "uploaded_by": current_user.email,
+        "status": "UPLOADED"
+    })
+    
+    db_case.uploaded_files = files
+    db.add(db_case)
+    db.commit()
+    db.refresh(db_case)
+    
+    return {"status": "SUCCESS", "message": f"Document '{file_info.get('document_name')}' uploaded."}
+
 
 @router.post("/{case_id}/sync", response_model=CaseSchema)
 async def sync_case_ehr(
@@ -85,7 +168,7 @@ async def sync_case_ehr(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Manually trigger EHR data fetch for a specific case."""
+    """Manually trigger EHR data fetch and Gap Analysis for a specific case."""
     db_case = crud_case.get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
@@ -100,24 +183,26 @@ async def sync_case_ehr(
             case_id=db_case.case_id
         )
         # Also trigger Gap Analysis during sync
-        print(f"[cases_endpoint] Manually triggering Gap Analysis sync for case: {case_id}...")
-        gap_result = run_gap_analysis({
+        print(f"[api] Manually Triggering Sync: {case_id}")
+        await run_gap_analysis({
             "case_id": case_id,
             "patient_name": f"Patient {db_case.patient_id}",
             "pdf_path": None
         })
-        print(f"[cases_endpoint] Sync Gap Analysis result: {gap_result.get('output', 'No output')[:100]}...")
+        
+        # Refresh case record to get updated gap fields
+        db.refresh(db_case)
+        
     except Exception as e:
         print(f"[cases_endpoint] Sync failed for {case_id}: {e}")
         traceback.print_exc()
-        # We don't necessarily want to fail the request if sync fails, 
-        # but let's return a 500 for now to help debugging
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch EHR data: {type(e).__name__}: {e}"
         )
         
-    return db_case
+    return merge_ehr_data_into_case(db, db_case)
+  
 
 
 @router.post("/{case_id}/eligibility")
