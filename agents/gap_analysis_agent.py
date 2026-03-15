@@ -26,7 +26,8 @@ from tools.gap_validator import gap_validator_tool
 # 1. ENVIRONMENT
 # ─────────────────────────────────────────
 
-load_dotenv()
+# Load environment variables from the backend directory
+load_dotenv(os.path.join(backend_dir, ".env"))
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # ─────────────────────────────────────────
@@ -34,7 +35,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # ─────────────────────────────────────────
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-2.0-flash",
     temperature=0,
     google_api_key=GOOGLE_API_KEY
 )
