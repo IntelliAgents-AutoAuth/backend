@@ -128,6 +128,24 @@ async def get_case_gap_analysis(
     return db_case.gap_result or {"status": "NOT_STARTED", "message": "Analysis in progress or not yet triggered."}
 
 
+@router.get("/{case_id}/timeline")
+async def get_case_timeline(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Returns full audit log timeline for a case."""
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    return {
+        "case_id":  case_id,
+        "status":   db_case.status,
+        "timeline": db_case.audit_log or []
+    }
+
+
 def _check_and_clear_gaps(db_case, case_id, db, background_tasks):
     """Shared heuristic to check if gaps are cleared and trigger eligibility."""
     if db_case.gap_result and "missing_documents" in db_case.gap_result:

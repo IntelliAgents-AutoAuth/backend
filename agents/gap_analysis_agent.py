@@ -12,8 +12,11 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
+from core.config import settings
 from constants.cases import CaseStatus
 from prompts.gap_analysis_prompts import get_gap_analysis_prompt
+from utils.agent_logger import log_event
+import time
 
 # ─────────────────────────────────────────
 # SILENCE NOISY LOGGERS
@@ -113,19 +116,57 @@ async def run_gap_analysis(props: dict) -> dict:
     print(f"\n[gap_analysis_agent] Gap analysis triggered for case_id={case_id}, patient={patient_name}")
     print(f"[gap_analysis_agent] --- Started for {case_id} ---")
 
+    agent_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "GAP_ANALYSIS_AGENT",
+        event      = "GAP_ANALYSIS_STARTED",
+        status     = "RUNNING",
+        message    = "Gap analysis triggered"
+    )
+
     # ── 1. PRE-EXTRACT DATA ──────────────────
     policy_text = "ERROR: Failed to extract policy."
     ehr_data = "ERROR: Failed to fetch EHR data."
 
     try:
         from tools.pdf_extractor import extract_raw_text
+        pdf_start = time.time()
+        log_event(
+            case_id    = case_id,
+            agent_name = "GAP_ANALYSIS_AGENT",
+            event      = "PDF_EXTRACTION_STARTED",
+            status     = "RUNNING"
+        )
         policy_text = extract_raw_text(pdf_path)
+        log_event(
+            case_id     = case_id,
+            agent_name  = "GAP_ANALYSIS_AGENT",
+            event       = "PDF_EXTRACTION_COMPLETED",
+            status      = "SUCCESS",
+            message     = f"Extracted {len(policy_text)} chars",
+            duration_ms = int((time.time() - pdf_start) * 1000)
+        )
         print(f"[gap_analysis_agent] PDF extracted successfully from {pdf_path} ({len(policy_text)} chars)")
     except Exception as e:
+        log_event(
+            case_id    = case_id,
+            agent_name = "GAP_ANALYSIS_AGENT",
+            event      = "PDF_EXTRACTION_FAILED",
+            status     = "FAILED",
+            message    = str(e)
+        )
         print(f"[gap_analysis_agent] PDF Extraction failed: {e}")
 
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
+        ehr_start = time.time()
+        log_event(
+            case_id    = case_id,
+            agent_name = "GAP_ANALYSIS_AGENT",
+            event      = "EHR_FETCH_STARTED",
+            status     = "RUNNING"
+        )
         raw_ehr = fetch_extracted_data_by_case(case_id)
         # Use default=str to handle datetime/date objects
         ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
@@ -139,6 +180,14 @@ async def run_gap_analysis(props: dict) -> dict:
         else:
             ehr_count = 1
 
+        log_event(
+            case_id     = case_id,
+            agent_name  = "GAP_ANALYSIS_AGENT",
+            event       = "EHR_FETCH_COMPLETED",
+            status      = "SUCCESS",
+            message     = "EHR data fetched successfully",
+            duration_ms = int((time.time() - ehr_start) * 1000)
+        )
         print(f"[gap_analysis_agent] EHR data fetched for {case_id}; records={ehr_count}")
 
         if isinstance(raw_ehr, dict):
@@ -150,6 +199,13 @@ async def run_gap_analysis(props: dict) -> dict:
                     print(f"[gap_analysis_agent] Uploaded files field exists: {type(uploaded_files)}")
 
     except Exception as e:
+        log_event(
+            case_id    = case_id,
+            agent_name = "GAP_ANALYSIS_AGENT",
+            event      = "EHR_FETCH_FAILED",
+            status     = "FAILED",
+            message    = str(e)
+        )
         print(f"[gap_analysis_agent] EHR Fetch failed: {e}")
 
     # ── 2. PREPARE INPUT ─────────────────────
@@ -177,12 +233,29 @@ INSTRUCTIONS:
     output = None
     parsed = None
 
+    llm_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "GAP_ANALYSIS_AGENT",
+        event      = "LLM_CALL_STARTED",
+        status     = "RUNNING",
+        message    = "Sending to Gemini for gap analysis"
+    )
+
     for attempt in range(1, 4):
         try:
             response = await get_llm_chain().ainvoke(agent_input)
             print(f"[gap_analysis_agent] LLM response received (attempt {attempt})")
             # LangChain returns an AIMessage; get raw text content
             output = response.content if hasattr(response, "content") else str(response)
+            log_event(
+                case_id     = case_id,
+                agent_name  = "GAP_ANALYSIS_AGENT",
+                event       = "LLM_CALL_COMPLETED",
+                status      = "SUCCESS",
+                message     = "Gemini responded successfully",
+                duration_ms = int((time.time() - llm_start) * 1000)
+            )
             break
         except Exception as e:
             error_text = str(e)
@@ -202,6 +275,13 @@ INSTRUCTIONS:
                 continue
             else:
                 print(f"[gap_analysis_agent] Non-retryable LLM error: {error_text}")
+                log_event(
+                    case_id    = case_id,
+                    agent_name = "GAP_ANALYSIS_AGENT",
+                    event      = "LLM_CALL_FAILED",
+                    status     = "FAILED",
+                    message    = error_text
+                )
                 parsed = {"status": "FAILED", "message": error_text, "raw": error_text}
                 break
 
@@ -266,6 +346,27 @@ INSTRUCTIONS:
             db.add(db_case)
             db.commit()
             db.refresh(db_case)
+
+            # ── LOG 5: Final Result ──────────────────
+            total_duration = int((time.time() - agent_start) * 1000)
+            gap_status = parsed.get("status", "UNKNOWN")
+            summary    = parsed.get("summary", {})
+
+            log_event(
+                case_id     = case_id,
+                agent_name  = "GAP_ANALYSIS_AGENT",
+                event       = "GAP_ANALYSIS_COMPLETED",
+                status      = gap_status,
+                message     = f"Missing {summary.get('total_missing', 0)} of {summary.get('total_required', 0)} documents",
+                metadata    = {
+                    "total_required": summary.get("total_required"),
+                    "total_matched":  summary.get("total_matched"),
+                    "total_missing":  summary.get("total_missing"),
+                    "gap_percentage": summary.get("gap_percentage"),
+                    "next_action":    parsed.get("next_action")
+                },
+                duration_ms = total_duration
+            )
             print(f"[gap_analysis_agent] Persisted results for {case_id}")
 
     except Exception as e:
@@ -276,6 +377,13 @@ INSTRUCTIONS:
                 db_case.status = CaseStatus.GAP_ANALYSIS_FAILED.value
                 db.add(db_case)
                 db.commit()
+                log_event(
+                    case_id    = case_id,
+                    agent_name = "GAP_ANALYSIS_AGENT",
+                    event      = "GAP_ANALYSIS_FAILED",
+                    status     = "FAILED",
+                    message    = str(e)
+                )
         except Exception as err:
             print(f"[gap_analysis_agent] Failed to mark gap analysis failure for {case_id}: {err}")
     finally:

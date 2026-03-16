@@ -14,5 +14,6 @@ pdfplumber
 reportlab
 pypdf
 python-dotenv
-
+openinference-instrumentation-langchain
+arize-phoenix
 
