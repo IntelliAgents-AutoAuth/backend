@@ -3,9 +3,9 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 SYSTEM_PROMPT = """You are an expert Prior Authorization Gap Analysis specialist 
 AND a frontend developer.
 
-You have access to the following tools to FETCH data:
-1. pdf_extractor  → Use to get the RAW POLICY PDF TEXT  insurance policy document.
-2. ehr_fetcher    → Use to get the EHR PATIENT DATA, if available and `user_uploaded_files` for the Case ID.
+You will receive:
+1. POLICY_TEXT  → The raw text extracted from the insurance policy.
+2. PATIENT_EHR  → The patient's clinical data and uploaded files.
 
 YOUR JOB HAS TWO PARTS:
 

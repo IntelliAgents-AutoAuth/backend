@@ -60,7 +60,6 @@ def get_eligibility_executor():
         input_key="input",
     )
 
-    # Tools — only data-fetching tools; LLM does the reasoning itself
     tools = [ehr_fetcher, pdf_extractor]
 
     # Prompt
@@ -141,18 +140,70 @@ def run_eligibility_check(props: dict) -> dict:
 
     executor = get_eligibility_executor()
 
+    # ── 1. PRE-EXTRACT DATA ──────────────────
+    policy_text = "ERROR: Failed to extract policy."
+    ehr_data = "ERROR: Failed to fetch EHR data."
+
+    try:
+        from tools.pdf_extractor import extract_raw_text
+        policy_text = extract_raw_text(pdf_path)
+    except Exception as e:
+        print(f"[eligibility_agent] PDF Extraction failed: {e}")
+
+    try:
+        from tools.ehr_fetcher import fetch_extracted_data_by_case
+        raw_ehr = fetch_extracted_data_by_case(case_id)
+        # Use default=str to handle datetime/date objects
+        ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
+    except Exception as e:
+        print(f"[eligibility_agent] EHR Fetch failed: {e}")
+
     result = executor.invoke({
         "case_id":  case_id,
         "pdf_path": pdf_path,
-        "input": (
-            "Determine whether this patient is eligible for the policy claim. "
-            "Follow the exact 5-step sequence defined in your instructions and "
-            "return a VERDICT and REASON."
-        ),
+        "input": f"""
+Perform a final Policy Eligibility Check for {case_id}.
+
+### POLICY_TEXT:
+{policy_text}
+
+### PATIENT_EHR:
+{ehr_data}
+
+INSTRUCTIONS:
+- Compare the PATIENT_EHR evidence against the POLICY_TEXT requirements.
+- Determine if the case is ELIGIBLE or NOT_ELIGIBLE.
+- Return a VERDICT and REASON following the strict sequence.
+"""
     })
 
     raw_output = result.get("output", "")
     parsed     = _parse_verdict(raw_output)
+
+    # ── PERSISTENCE ──────────────────────────
+    from db.session import SessionLocal
+    from crud import crud_case
+    db = SessionLocal()
+    try:
+        db_case = crud_case.get_case(db, case_id=case_id)
+        if db_case:
+            db_case.eligibility_result = parsed
+            db_case.eligibility_verdict = parsed.get("verdict")
+            # If eligible, we can move the status forward
+            if parsed.get("eligible"):
+                db_case.status = "APPROVED" # Or another appropriate terminal state
+            else:
+                db_case.status = "DENIED"
+            
+            db.add(db_case)
+            db.commit()
+            db.refresh(db_case)
+            print(f"[eligibility_agent] Persisted results for {case_id}")
+    except Exception as e:
+        print(f"[eligibility_agent] Persistence failed for {case_id}: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
     return {
         "case_id": case_id,

@@ -41,8 +41,9 @@ def get_eligibility_prompt():
 
     system_parts = [
         SYSTEM_PROMPT,
-        "You have access to the following tools:",
-        "{tools}",
+        "You will receive:",
+        "1. POLICY_TEXT  → The raw text extracted from the insurance policy.",
+        "2. PATIENT_EHR  → The patient's clinical data and evidence.",
         "Use a json blob to specify a tool by providing an action key (tool name) and an action_input key (tool input).",
         "Valid \"action\" values: \"Final Answer\" or {tool_names}",
         "Follow this format:",
