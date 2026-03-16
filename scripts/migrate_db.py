@@ -20,7 +20,9 @@ def migrate():
         ("total_required", "INTEGER"),
         ("total_matched", "INTEGER"),
         ("total_missing", "INTEGER"),
-        ("gap_percentage", "FLOAT")
+        ("gap_percentage", "FLOAT"),
+        ("eligibility_result", "JSON"),
+        ("eligibility_verdict", "VARCHAR(30)")
     ]
 
     for col_name, col_type in columns_to_add:

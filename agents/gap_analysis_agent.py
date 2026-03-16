@@ -13,6 +13,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_classic.agents import AgentExecutor, create_structured_chat_agent
 from langchain_classic.memory import ConversationBufferMemory
 
+from constants.cases import CaseStatus
 from prompts.gap_analysis_prompts import get_gap_analysis_prompt
 from tools.ehr_fetcher import ehr_fetcher
 from tools.pdf_extractor import pdf_extractor
@@ -48,7 +49,7 @@ def get_agent_executor():
 
     # ── 2. LLM ──────────────────────────────
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         temperature=0,
         google_api_key=api_key
     )
@@ -62,9 +63,10 @@ def get_agent_executor():
     )
 
     # ── 4. TOOLS ─────────────────────────────
+    # No external tools: one-shot, single LLM call path for gap analysis.
     tools = [
-        ehr_fetcher,
         pdf_extractor,
+        ehr_fetcher,
         gap_validator_tool
     ]
 
@@ -118,10 +120,30 @@ async def run_gap_analysis(props: dict) -> dict:
       }
     """
     case_id      = props.get("case_id")
-    pdf_path     =  os.path.join(
+    pdf_path     = props.get("pdf_path")
+    if not pdf_path or not os.path.exists(pdf_path):
+        pdf_path = os.path.join(
             backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
         )
     patient_name = props.get("patient_name", "Unknown")
+
+    from crud import crud_case
+    db = SessionLocal()
+
+    # Prevent duplicate parallel gap analysis
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if db_case and db_case.status == CaseStatus.GAP_ANALYSIS_RUNNING.value:
+        print(f"[gap_analysis_agent] Gap analysis already running for {case_id}, skipping duplicate invocation.")
+        db.close()
+        return {"case_id": case_id, "output": {"status": "IN_PROGRESS", "message": "Gap analysis already running."}}
+
+    # Mark as running
+    if db_case:
+        db_case.status = CaseStatus.GAP_ANALYSIS_RUNNING.value
+        db.add(db_case)
+        db.commit()
+
+    db.close()
 
     # ── Default PDF for demo/testing ─────────
     if not pdf_path or not os.path.exists(pdf_path):
@@ -129,35 +151,138 @@ async def run_gap_analysis(props: dict) -> dict:
             backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
         )
 
-    print(f"\n[gap_analysis_agent] --- Started for {case_id} ---")
+    print(f"\n[gap_analysis_agent] Gap analysis triggered for case_id={case_id}, patient={patient_name}")
+    print(f"[gap_analysis_agent] --- Started for {case_id} ---")
 
-    # ── agent_input — data only, NO instructions ──
-    # Instructions are in system prompt (gap_analysis_prompts.py)
-    # agent_input only passes case specific data
+    # ── 1. PRE-EXTRACT DATA ──────────────────
+    policy_text = "ERROR: Failed to extract policy."
+    ehr_data = "ERROR: Failed to fetch EHR data."
+
+    try:
+        from tools.pdf_extractor import extract_raw_text
+        policy_text = extract_raw_text(pdf_path)
+        print(f"[gap_analysis_agent] PDF extracted successfully from {pdf_path} ({len(policy_text)} chars)")
+    except Exception as e:
+        print(f"[gap_analysis_agent] PDF Extraction failed: {e}")
+
+    try:
+        from tools.ehr_fetcher import fetch_extracted_data_by_case
+        raw_ehr = fetch_extracted_data_by_case(case_id)
+        # Use default=str to handle datetime/date objects
+        ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
+
+        if raw_ehr is None:
+            ehr_count = 0
+        elif isinstance(raw_ehr, list):
+            ehr_count = len(raw_ehr)
+        elif isinstance(raw_ehr, dict):
+            ehr_count = len(raw_ehr)
+        else:
+            ehr_count = 1
+
+        print(f"[gap_analysis_agent] EHR data fetched for {case_id}; records={ehr_count}")
+
+        if isinstance(raw_ehr, dict):
+            uploaded_files = raw_ehr.get("uploaded_files") or raw_ehr.get("files") or raw_ehr.get("documents")
+            if uploaded_files:
+                if isinstance(uploaded_files, list):
+                    print(f"[gap_analysis_agent] Bulk uploaded files detected: {len(uploaded_files)} entries")
+                else:
+                    print(f"[gap_analysis_agent] Uploaded files field exists: {type(uploaded_files)}")
+
+    except Exception as e:
+        print(f"[gap_analysis_agent] EHR Fetch failed: {e}")
+
+    # ── 2. PREPARE INPUT ─────────────────────
     agent_input = {
         "input": f"""
-Please perform a gap analysis for:
-- Case ID      : {case_id}
-- Patient Name : {patient_name}
-- PDF Path     : {pdf_path}
+Perform a Gap Analysis for {case_id}.
+
+### POLICY_TEXT:
+{policy_text}
+
+### PATIENT_EHR:
+{ehr_data}
 
 INSTRUCTIONS:
-1. CALL `pdf_extractor` to get the policy requirements.
-2. CALL `ehr_fetcher` to get the patient record.
-3. Compare them and return the Gap Analysis JSON.
+- Review the POLICY_TEXT for requirements.
+- Review the PATIENT_EHR for evidence.
+- Return the structured Gap Analysis JSON.
 """
     }
 
-    result = await get_agent_executor().ainvoke(agent_input)
-    output = result.get("output")
+    # ── 3. RUN LLM ───────────────────────────
+    # One-shot LLM call (single iteration, no loop). Input already includes both policy + EHR.
+    print("[gap_analysis_agent] Sending one-shot request to LLM for gap analysis...")
 
-    if isinstance(output, dict):
-        output = json.dumps(output, indent=2)
+    result = None
+    output = None
+    parsed = None
 
-    try:
-        parsed = json.loads(output)
-    except Exception:
-        parsed = {"raw": output}
+    for attempt in range(1, 4):
+        try:
+            result = await get_agent_executor().ainvoke(agent_input)
+            print(f"[gap_analysis_agent] LLM response received (attempt {attempt})")
+            output = result.get("output")
+            break
+        except Exception as e:
+            error_text = str(e)
+            print(f"[gap_analysis_agent] LLM request failed on attempt {attempt}: {error_text}")
+
+            # Rate-limit handling for Gemini / genai ClientError
+            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text or "Too Many Requests" in error_text:
+                retry_delay = 10.0
+                # Parse RetryInfo if in message
+                if "retryDelay" in error_text:
+                    import re
+                    match = re.search(r"([0-9]+(?:\.[0-9]+)?)s", error_text)
+                    if match:
+                        retry_delay = float(match.group(1))
+                print(f"[gap_analysis_agent] Rate limit hit; retrying in {retry_delay}s...")
+                import asyncio
+                await asyncio.sleep(retry_delay)
+                continue
+            else:
+                print(f"[gap_analysis_agent] Non-retryable LLM error: {error_text}")
+                parsed = {"status": "FAILED", "message": error_text, "raw": error_text}
+                break
+
+    if output is None and parsed is None:
+        parsed = {"status": "FAILED", "message": "LLM did not return output after retries", "raw": ""}
+
+    if output is not None:
+        if isinstance(output, dict):
+            output = json.dumps(output, indent=2)
+
+        if isinstance(output, str) and "Agent stopped due to iteration limit" in output:
+            print("[gap_analysis_agent] WARNING: Agent stopped due to iteration limit/time limit. Marking as INCOMPLETE.")
+            parsed = {
+                "status": "INCOMPLETE",
+                "case_id": case_id,
+                "message": "LLM iteration/time limit reached; partial result may be available.",
+                "raw": output
+            }
+        else:
+            try:
+                parsed = json.loads(output)
+            except Exception:
+                parsed = {"raw": output}
+
+    if isinstance(parsed, dict):
+        summary = parsed.get("summary", {})
+        total_required = summary.get("total_required")
+        total_matched = summary.get("total_matched")
+        total_missing = summary.get("total_missing")
+        gap_pct = summary.get("gap_percentage")
+
+        if total_required is None or total_matched is None or total_missing is None:
+            print("[gap_analysis_agent] WARNING: Gap analysis summary is missing from LLM output.")
+
+        print(f"[gap_analysis_agent] Gap result summary: total_required={total_required}, total_matched={total_matched}, total_missing={total_missing}, gap_percentage={gap_pct}")
+    else:
+        print("[gap_analysis_agent] WARNING: Unable to parse LLM output into dict summary.")
+
+    print(f"[gap_analysis_agent] About to send result back to frontend for case_id={case_id}")
 
     # ── PERSISTENCE ──────────────────────────
     # Create a fresh DB session for the background task
@@ -167,19 +292,41 @@ INSTRUCTIONS:
         if db_case:
             summary = parsed.get("summary", {})
             db_case.gap_result = parsed
-            db_case.status     = parsed.get("status", db_case.status)
+
+            # Keep status from LLM if valid, else once complete set to GAP_CLEARED or GAP_ANALYSIS_FAILED
+            new_status = parsed.get("status")
+            if new_status == "INCOMPLETE":
+                db_case.status = CaseStatus.GAP_ANALYSIS_FAILED.value
+            elif new_status:
+                db_case.status = new_status
+            else:
+                # If the LLM returns a complete result but no explicit status,
+                # mark as GAP_CLEARED when no missing documents are found.
+                missing_docs = parsed.get("missing_documents")
+                if isinstance(missing_docs, list) and len(missing_docs) == 0:
+                    db_case.status = CaseStatus.GAP_CLEARED.value
+
+
             db_case.total_required = summary.get("total_required")
             db_case.total_matched  = summary.get("total_matched")
             db_case.total_missing  = summary.get("total_missing")
             db_case.gap_percentage = summary.get("gap_percentage")
-            
+
             db.add(db_case)
             db.commit()
             db.refresh(db_case)
             print(f"[gap_analysis_agent] Persisted results for {case_id}")
+
     except Exception as e:
-        print(f"[gap_analysis_agent] Persistence failed for {case_id}: {e}")
+        print(f"[gap_analysis_agent] Persistence/Chaining failed for {case_id}: {e}")
         db.rollback()
+        try:
+            if db_case:
+                db_case.status = CaseStatus.GAP_ANALYSIS_FAILED.value
+                db.add(db_case)
+                db.commit()
+        except Exception as err:
+            print(f"[gap_analysis_agent] Failed to mark gap analysis failure for {case_id}: {err}")
     finally:
         db.close()
 

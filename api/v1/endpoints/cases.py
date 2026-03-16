@@ -128,38 +128,95 @@ async def get_case_gap_analysis(
     return db_case.gap_result or {"status": "NOT_STARTED", "message": "Analysis in progress or not yet triggered."}
 
 
+def _check_and_clear_gaps(db_case, case_id, db, background_tasks):
+    """Shared heuristic to check if gaps are cleared and trigger eligibility."""
+    if db_case.gap_result and "missing_documents" in db_case.gap_result:
+        missing_docs = db_case.gap_result["missing_documents"]
+        requirement_keys = {d["document_name"].strip().lower() for d in missing_docs}
+        uploaded_keys = {f["missing_key"].strip().lower() for f in db_case.uploaded_files if f.get("missing_key")}
+        
+        print(f"[api] Checking gaps for {case_id}: req={requirement_keys}, uploaded={uploaded_keys}")
+        
+        if requirement_keys and requirement_keys.issubset(uploaded_keys):
+            print(f"[api] SUCCESS: All gaps cleared for {case_id}. Auto-triggering Eligibility.")
+            db_case.status = "GAP_CLEARED"
+            
+            gap_res = dict(db_case.gap_result)
+            gap_res["status"] = "GAP_CLEARED"
+            gap_res["missing_documents"] = []
+            db_case.gap_result = gap_res
+            
+            db.commit()
+            
+            from agents.eligibility_agent import run_eligibility_check
+            background_tasks.add_task(run_eligibility_check, {
+                "case_id": case_id,
+                "pdf_path": None
+            })
+        else:
+            diff = requirement_keys - uploaded_keys
+            print(f"[api] Gaps still exist for {case_id}. Missing: {diff}")
+
 @router.post("/{case_id}/upload")
 async def upload_case_document(
     case_id: str,
-    file_info: dict, # Expected: {"document_name": "...", "file_path": "...", "missing_key": "..."}
+    file_info: dict,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Simulate document upload by adding info to the case record."""
+    """Single document upload."""
     db_case = crud_case.get_case(db, case_id=case_id)
     if not db_case:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Case with ID {case_id} not found"
-        )
+        raise HTTPException(status_code=404, detail="Case not found")
     
     files = db_case.uploaded_files or []
     files.append({
         "document_name": file_info.get("document_name"),
         "file_path": file_info.get("file_path"),
-        "field_value": file_info.get("field_value"), # New: store actual data value if it's not a file
-        "missing_key": file_info.get("missing_key"), # The ID/Key of the missing doc this satisfies
+        "field_value": file_info.get("field_value"),
+        "missing_key": file_info.get("missing_key"),
         "uploaded_at": datetime.now().isoformat(),
         "uploaded_by": current_user.email,
         "status": "UPLOADED"
     })
-    
     db_case.uploaded_files = files
-    db.add(db_case)
     db.commit()
     db.refresh(db_case)
     
-    return {"status": "SUCCESS", "message": f"Document '{file_info.get('document_name')}' uploaded."}
+    _check_and_clear_gaps(db_case, case_id, db, background_tasks)
+    return {"status": "SUCCESS"}
+
+@router.post("/{case_id}/bulk-upload")
+async def bulk_upload_case_documents(
+    case_id: str,
+    payload: list[dict],
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Bulk document upload to prevent race conditions."""
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    files = db_case.uploaded_files or []
+    for info in payload:
+        files.append({
+            "document_name": info.get("document_name"),
+            "file_path": info.get("file_path"),
+            "field_value": info.get("field_value"),
+            "missing_key": info.get("missing_key"),
+            "uploaded_at": datetime.now().isoformat(),
+            "uploaded_by": current_user.email,
+            "status": "UPLOADED"
+        })
+    db_case.uploaded_files = files
+    db.commit()
+    db.refresh(db_case)
+    
+    _check_and_clear_gaps(db_case, case_id, db, background_tasks)
+    return {"status": "SUCCESS"}
 
 
 @router.post("/{case_id}/sync", response_model=CaseSchema)
