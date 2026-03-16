@@ -19,6 +19,8 @@ if backend_dir not in sys.path:
 
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
+from utils.agent_logger import log_event
+import time
 
 from prompts.eligibility_prompts import get_eligibility_prompt
 
@@ -110,6 +112,15 @@ def run_eligibility_check(props: dict) -> dict:
         )
 
     chain = get_eligibility_chain()
+    agent_start = time.time()
+
+    log_event(
+        case_id    = case_id,
+        agent_name = "ELIGIBILITY_AGENT",
+        event      = "ELIGIBILITY_CHECK_STARTED",
+        status     = "RUNNING",
+        message    = "Eligibility check triggered"
+    )
 
     # ── 1. PRE-EXTRACT DATA ──────────────────
     policy_text = "ERROR: Failed to extract policy."
@@ -117,18 +128,71 @@ def run_eligibility_check(props: dict) -> dict:
 
     try:
         from tools.pdf_extractor import extract_raw_text
+        pdf_start = time.time()
+        log_event(
+            case_id    = case_id,
+            agent_name = "ELIGIBILITY_AGENT",
+            event      = "PDF_EXTRACTION_STARTED",
+            status     = "RUNNING"
+        )
         policy_text = extract_raw_text(pdf_path)
+        log_event(
+            case_id     = case_id,
+            agent_name  = "ELIGIBILITY_AGENT",
+            event       = "PDF_EXTRACTION_COMPLETED",
+            status      = "SUCCESS",
+            message     = f"Extracted {len(policy_text)} chars",
+            duration_ms = int((time.time() - pdf_start) * 1000)
+        )
     except Exception as e:
+        log_event(
+            case_id    = case_id,
+            agent_name = "ELIGIBILITY_AGENT",
+            event      = "PDF_EXTRACTION_FAILED",
+            status     = "FAILED",
+            message    = str(e)
+        )
         print(f"[eligibility_agent] PDF Extraction failed: {e}")
 
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
+        ehr_start = time.time()
+        log_event(
+            case_id    = case_id,
+            agent_name = "ELIGIBILITY_AGENT",
+            event      = "EHR_FETCH_STARTED",
+            status     = "RUNNING"
+        )
         raw_ehr = fetch_extracted_data_by_case(case_id)
         ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
+        log_event(
+            case_id     = case_id,
+            agent_name  = "ELIGIBILITY_AGENT",
+            event       = "EHR_FETCH_COMPLETED",
+            status      = "SUCCESS",
+            message     = "EHR data fetched successfully",
+            duration_ms = int((time.time() - ehr_start) * 1000)
+        )
     except Exception as e:
+        log_event(
+            case_id    = case_id,
+            agent_name = "ELIGIBILITY_AGENT",
+            event      = "EHR_FETCH_FAILED",
+            status     = "FAILED",
+            message    = str(e)
+        )
         print(f"[eligibility_agent] EHR Fetch failed: {e}")
 
     print(f"[eligibility_agent] Sending one-shot eligibility request to LLM for {case_id}...")
+    llm_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "ELIGIBILITY_AGENT",
+        event      = "LLM_VERDICT_STARTED",
+        status     = "RUNNING",
+        message    = "Reasoning over policy and EHR"
+    )
+
     response = chain.invoke({
         "input": f"""
 Perform a final Policy Eligibility Check for {case_id}.
@@ -145,6 +209,15 @@ INSTRUCTIONS:
 - Return a VERDICT and REASON following the strict sequence.
 """
     })
+    
+    log_event(
+        case_id     = case_id,
+        agent_name  = "ELIGIBILITY_AGENT",
+        event       = "LLM_VERDICT_COMPLETED",
+        status      = "SUCCESS",
+        message     = "Eligibility verdict received",
+        duration_ms = int((time.time() - llm_start) * 1000)
+    )
 
     raw_output = response.content if hasattr(response, "content") else str(response)
     parsed     = _parse_verdict(raw_output)
@@ -160,19 +233,40 @@ INSTRUCTIONS:
             db_case.eligibility_verdict = parsed.get("verdict")
             # If eligible, we can move the status forward
             if parsed.get("eligible"):
-                db_case.status = "APPROVED" # Or another appropriate terminal state
+                db_case.status = "APPROVED"
             else:
                 db_case.status = "DENIED"
             
             db.add(db_case)
             db.commit()
             db.refresh(db_case)
+            
+            total_duration = int((time.time() - agent_start) * 1000)
+            log_event(
+                case_id     = case_id,
+                agent_name  = "ELIGIBILITY_AGENT",
+                event       = "ELIGIBILITY_CHECK_COMPLETED",
+                status      = parsed.get("verdict"),
+                message     = parsed.get("reason")[:200] + "..." if len(parsed.get("reason", "")) > 200 else parsed.get("reason"),
+                metadata    = parsed,
+                duration_ms = total_duration
+            )
             print(f"[eligibility_agent] Persisted results for {case_id}")
     except Exception as e:
         print(f"[eligibility_agent] Persistence failed for {case_id}: {e}")
         db.rollback()
     finally:
         db.close()
+
+    # ── AUTO-CHAINING ────────────────────────
+    # Trigger document generation ONLY if approved
+    if parsed.get("eligible"):
+        print(f"[eligibility_agent] SUCCESS: Case {case_id} is eligible. Triggering Document Generation...")
+        from agents.pa_document_agent import generate_pa_content
+        try:
+            generate_pa_content(case_id=case_id, pdf_path=pdf_path)
+        except Exception as doc_err:
+            print(f"[eligibility_agent] Auto-chaining Document Agent failed: {doc_err}")
 
     return {
         "case_id": case_id,

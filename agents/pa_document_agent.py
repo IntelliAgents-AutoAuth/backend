@@ -13,6 +13,8 @@ import sys
 import json
 import re
 from datetime import datetime
+from utils.agent_logger import log_event
+import time
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
@@ -93,42 +95,135 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
     if not pdf_path:
         pdf_path = os.path.join(backend_dir, "policy-pdfs", "aetna", "test_doc.pdf")
 
+    agent_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "PA_DOCUMENT_AGENT",
+        event      = "DOCUMENT_GENERATION_STARTED",
+        status     = "RUNNING",
+        message    = "Prior Auth package generation triggered"
+    )
+
     # 1. Fetch EHR
+    ehr_fetch_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "PA_DOCUMENT_AGENT",
+        event      = "EHR_FETCH_STARTED",
+        status     = "RUNNING"
+    )
     ehr = fetch_extracted_data_by_case(case_id) or {}
     ehr_text = _ehr_to_text(ehr)
+    log_event(
+        case_id     = case_id,
+        agent_name  = "PA_DOCUMENT_AGENT",
+        event       = "EHR_FETCH_COMPLETED",
+        status      = "SUCCESS",
+        duration_ms = int((time.time() - ehr_fetch_start) * 1000)
+    )
 
     # 2. Extract policy text (for checklist)
+    pdf_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "PA_DOCUMENT_AGENT",
+        event      = "PDF_EXTRACTION_STARTED",
+        status     = "RUNNING"
+    )
     policy_text = ""
     if os.path.exists(pdf_path):
         try:
             policy_text = extract_raw_text(pdf_path)
+            log_event(
+                case_id     = case_id,
+                agent_name  = "PA_DOCUMENT_AGENT",
+                event       = "PDF_EXTRACTION_COMPLETED",
+                status      = "SUCCESS",
+                duration_ms = int((time.time() - pdf_start) * 1000)
+            )
         except Exception as e:
+            log_event(
+                case_id    = case_id,
+                agent_name = "PA_DOCUMENT_AGENT",
+                event      = "PDF_EXTRACTION_FAILED",
+                status     = "FAILED",
+                message    = str(e)
+            )
             print(f"[pa_document_agent] PDF extraction failed: {e}")
             policy_text = "Policy PDF could not be read."
     else:
+        log_event(
+            case_id    = case_id,
+            agent_name = "PA_DOCUMENT_AGENT",
+            event      = "PDF_EXTRACTION_FAILED",
+            status     = "FAILED",
+            message    = "Policy PDF not found"
+        )
         policy_text = "Policy PDF not found."
 
     today = datetime.now().strftime("%B %d, %Y")
 
     # 3. Generate Cover Letter
     print("[pa_document_agent] Generating cover letter...")
+    cl_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "PA_DOCUMENT_AGENT",
+        event      = "COVER_LETTER_GENERATION_STARTED",
+        status     = "RUNNING"
+    )
     cover_letter = _invoke(
         get_cover_letter_prompt(),
         {"ehr_data": ehr_text, "date": today},
     )
+    log_event(
+        case_id     = case_id,
+        agent_name  = "PA_DOCUMENT_AGENT",
+        event       = "COVER_LETTER_GENERATION_COMPLETED",
+        status      = "SUCCESS",
+        duration_ms = int((time.time() - cl_start) * 1000)
+    )
 
     # 4. Generate Clinical Summary
     print("[pa_document_agent] Generating clinical summary...")
+    cs_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "PA_DOCUMENT_AGENT",
+        event      = "CLINICAL_SUMMARY_GENERATION_STARTED",
+        status     = "RUNNING"
+    )
     clinical_summary = _invoke(
         get_clinical_summary_prompt(),
         {"ehr_data": ehr_text},
     )
+    log_event(
+        case_id     = case_id,
+        agent_name  = "PA_DOCUMENT_AGENT",
+        event       = "CLINICAL_SUMMARY_GENERATION_COMPLETED",
+        status      = "SUCCESS",
+        duration_ms = int((time.time() - cs_start) * 1000)
+    )
 
     # 5. Generate Checklist
     print("[pa_document_agent] Generating checklist...")
+    ch_start = time.time()
+    log_event(
+        case_id    = case_id,
+        agent_name = "PA_DOCUMENT_AGENT",
+        event      = "CHECKLIST_GENERATION_STARTED",
+        status     = "RUNNING"
+    )
     raw_checklist = _invoke(
         get_checklist_prompt(),
         {"ehr_data": ehr_text, "policy_text": policy_text[:4000]},
+    )
+    log_event(
+        case_id     = case_id,
+        agent_name  = "PA_DOCUMENT_AGENT",
+        event       = "CHECKLIST_GENERATION_COMPLETED",
+        status      = "SUCCESS",
+        duration_ms = int((time.time() - ch_start) * 1000)
     )
 
     # Parse checklist JSON — gracefully fall back if LLM output is imperfect
@@ -140,6 +235,15 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
     except Exception as e:
         print(f"[pa_document_agent] Checklist JSON parse failed: {e}")
         checklist = [{"item": "See generated summary", "met": True, "evidence": raw_checklist[:300]}]
+
+    log_event(
+        case_id     = case_id,
+        agent_name  = "PA_DOCUMENT_AGENT",
+        event       = "DOCUMENT_GENERATION_COMPLETED",
+        status      = "SUCCESS",
+        message     = f"Generated cover letter, summary, and {len(checklist)} checklist items",
+        duration_ms = int((time.time() - agent_start) * 1000)
+    )
 
     return {
         "ehr": ehr,
