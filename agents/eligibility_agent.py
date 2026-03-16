@@ -2,15 +2,15 @@
 Policy Eligibility Agent
 
 Determines whether a patient is eligible for a policy claim by:
-1. Fetching the full EHR record via ehr_fetcher
-2. Extracting policy requirements from a PDF via pdf_extractor
-3. LLM directly reasons over the EHR data vs. policy requirements
-4. LLM produces ELIGIBLE / NOT_ELIGIBLE verdict with reasoning
+1. Fetching the full EHR record and policy PDF (pre-extracted)
+2. LLM directly reasons over the data in a single call
+3. LLM produces ELIGIBLE / NOT_ELIGIBLE verdict with reasoning
 """
 
 import os
 import re
 import sys
+import json
 
 # Ensure backend root is on sys.path for local imports
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,65 +19,36 @@ if backend_dir not in sys.path:
 
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_classic.agents import AgentExecutor, create_structured_chat_agent
-from langchain_classic.memory import ConversationBufferMemory
 
 from prompts.eligibility_prompts import get_eligibility_prompt
-from tools.ehr_fetcher import ehr_fetcher
-from tools.pdf_extractor import pdf_extractor
 
 # ─────────────────────────────────────────
-# 1. SINGLETON AGENT EXECUTOR
+# 1. SINGLETON LLM CHAIN (direct call, no agent loop)
 # ─────────────────────────────────────────
 
-_eligibility_executor = None
+_eligibility_chain = None
 
 
-def get_eligibility_executor():
+def get_eligibility_chain():
     """Lazy singleton — only spins up the LLM once."""
-    global _eligibility_executor
-    if _eligibility_executor is not None:
-        return _eligibility_executor
+    global _eligibility_chain
+    if _eligibility_chain is not None:
+        return _eligibility_chain
 
     load_dotenv(os.path.join(backend_dir, ".env"))
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         print("[eligibility_agent] WARNING: GOOGLE_API_KEY is not set.")
 
-    # LLM
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
         temperature=0,
         google_api_key=api_key,
     )
 
-    # Memory (fresh per-call is fine; we create new memory each run)
-    # Using a shared instance here is intentional so the agent can hold
-    # its reasoning chain within a single invocation.
-    memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True,
-        input_key="input",
-    )
-
-    tools = [ehr_fetcher, pdf_extractor]
-
-    # Prompt
     prompt = get_eligibility_prompt()
-
-    # Agent
-    agent = create_structured_chat_agent(llm=llm, tools=tools, prompt=prompt)
-
-    # Executor
-    _eligibility_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        memory=memory,
-        max_iterations=8,
-        verbose=True,
-        handle_parsing_errors=True,
-    )
-    return _eligibility_executor
+    _eligibility_chain = prompt | llm
+    return _eligibility_chain
 
 
 # ─────────────────────────────────────────
@@ -138,7 +109,7 @@ def run_eligibility_check(props: dict) -> dict:
             backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
         )
 
-    executor = get_eligibility_executor()
+    chain = get_eligibility_chain()
 
     # ── 1. PRE-EXTRACT DATA ──────────────────
     policy_text = "ERROR: Failed to extract policy."
@@ -153,14 +124,12 @@ def run_eligibility_check(props: dict) -> dict:
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
         raw_ehr = fetch_extracted_data_by_case(case_id)
-        # Use default=str to handle datetime/date objects
         ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
     except Exception as e:
         print(f"[eligibility_agent] EHR Fetch failed: {e}")
 
-    result = executor.invoke({
-        "case_id":  case_id,
-        "pdf_path": pdf_path,
+    print(f"[eligibility_agent] Sending one-shot eligibility request to LLM for {case_id}...")
+    response = chain.invoke({
         "input": f"""
 Perform a final Policy Eligibility Check for {case_id}.
 
@@ -177,7 +146,7 @@ INSTRUCTIONS:
 """
     })
 
-    raw_output = result.get("output", "")
+    raw_output = response.content if hasattr(response, "content") else str(response)
     parsed     = _parse_verdict(raw_output)
 
     # ── PERSISTENCE ──────────────────────────

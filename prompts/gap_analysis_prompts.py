@@ -1,4 +1,4 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 
 SYSTEM_PROMPT = """You are an expert Prior Authorization Gap Analysis specialist 
 AND a frontend developer.
@@ -81,41 +81,9 @@ STRICT RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - NEVER hallucinate document names
 - NEVER assume a document exists
-- ALWAYS return valid JSON only
-- NEVER add explanation outside JSON
+- ALWAYS return valid JSON only — no explanation, no markdown fences
 - ALWAYS use real HTML input type values
 - NEVER invent your own input type names
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOOL USAGE FORMAT:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Use JSON blob to call tools:
-```
-{{
-  "action": "tool_name",
-  "action_input": {{"key": "value"}}
-}}
-```
-
-Valid actions: {tool_names} or "Final Answer"
-
-THINKING FORMAT:
-Thought: what I need to do next
-Action:
-```
-$JSON_BLOB
-```
-Observation: result of action
-... repeat until done ...
-Thought: I have all information needed
-Action:
-```
-{{
-  "action": "Final Answer",
-  "action_input": "PASTE FINAL JSON HERE AS A PLAIN STRING"
-}}
-```
-Note: The final JSON must be provided as a single continuous string inside the "action_input" field.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FINAL OUTPUT — RETURN EXACTLY THIS JSON:
@@ -218,24 +186,16 @@ EXAMPLE missing_documents output:
   }}
 ]
 
-Tools available:
-{tools}
 """
 
 
 def get_gap_analysis_prompt() -> ChatPromptTemplate:
     """
-    Returns structured chat prompt for gap analysis agent.
-    Compatible with create_structured_chat_agent + Gemini.
-
+    Returns a simple system + human prompt for direct LLM chain invocation.
     Input variables at runtime:
-    - input            -> case_id + pdf_raw_text + ehr_data
-    - chat_history     -> managed by LangChain memory
-    - agent_scratchpad -> managed by LangChain agent
+    - input -> case_id + pdf_raw_text + ehr_data
     """
-
     return ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}\n\n{agent_scratchpad}")
+        ("human", "{input}")
     ])

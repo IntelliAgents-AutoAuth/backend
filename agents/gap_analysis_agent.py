@@ -7,17 +7,13 @@ import json
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
-  
+
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_classic.agents import AgentExecutor, create_structured_chat_agent
-from langchain_classic.memory import ConversationBufferMemory
+from langchain_core.prompts import ChatPromptTemplate
 
 from constants.cases import CaseStatus
 from prompts.gap_analysis_prompts import get_gap_analysis_prompt
-from tools.ehr_fetcher import ehr_fetcher
-from tools.pdf_extractor import pdf_extractor
-from tools.gap_validator import gap_validator_tool
 
 # ─────────────────────────────────────────
 # SILENCE NOISY LOGGERS
@@ -32,67 +28,30 @@ logging.getLogger("httpx").setLevel(logging.ERROR)
 load_dotenv(os.path.join(backend_dir, ".env"))
 
 # ─────────────────────────────────────────
-# LAZY SINGLETON
+# LAZY SINGLETON — Direct LLM chain (no agent loop)
 # ─────────────────────────────────────────
-_agent_executor = None
+_llm_chain = None
 
 
-def get_agent_executor():
-    """Lazy initialization — agent created once, reused for all calls."""
-    global _agent_executor
-    if _agent_executor is not None:
-        return _agent_executor
+def get_llm_chain():
+    """Lazy initialization — LLM chain created once, reused for all calls."""
+    global _llm_chain
+    if _llm_chain is not None:
+        return _llm_chain
 
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         print("[gap_analysis_agent] WARNING: GOOGLE_API_KEY is not set.")
 
-    # ── 2. LLM ──────────────────────────────
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-2.5-flash-lite",
         temperature=0,
         google_api_key=api_key
     )
 
-    # ── 3. MEMORY ────────────────────────────
-    memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True,
-        input_key="input",
-         output_key="output"  
-    )
-
-    # ── 4. TOOLS ─────────────────────────────
-    # No external tools: one-shot, single LLM call path for gap analysis.
-    tools = [
-        pdf_extractor,
-        ehr_fetcher,
-        gap_validator_tool
-    ]
-
-    # ── 5. PROMPT ────────────────────────────
-    # Instructions are in system prompt — NOT in agent_input
     prompt = get_gap_analysis_prompt()
-
-    # ── 6. AGENT ─────────────────────────────
-    agent = create_structured_chat_agent(
-        llm=llm,
-        tools=tools,
-        prompt=prompt
-    )
-
-    # ── 7. EXECUTOR ──────────────────────────
-    _agent_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        memory=memory,
-        max_iterations=6,
-        verbose=False,
-        handle_parsing_errors=True,
-        return_intermediate_steps=False
-    )
-
-    return _agent_executor
+    _llm_chain = prompt | llm
+    return _llm_chain
 
 
 # ─────────────────────────────────────────
@@ -212,18 +171,18 @@ INSTRUCTIONS:
     }
 
     # ── 3. RUN LLM ───────────────────────────
-    # One-shot LLM call (single iteration, no loop). Input already includes both policy + EHR.
+    # Direct one-shot LLM call — no agent loop, no tools, no iteration limit.
     print("[gap_analysis_agent] Sending one-shot request to LLM for gap analysis...")
 
-    result = None
     output = None
     parsed = None
 
     for attempt in range(1, 4):
         try:
-            result = await get_agent_executor().ainvoke(agent_input)
+            response = await get_llm_chain().ainvoke(agent_input)
             print(f"[gap_analysis_agent] LLM response received (attempt {attempt})")
-            output = result.get("output")
+            # LangChain returns an AIMessage; get raw text content
+            output = response.content if hasattr(response, "content") else str(response)
             break
         except Exception as e:
             error_text = str(e)
@@ -232,7 +191,6 @@ INSTRUCTIONS:
             # Rate-limit handling for Gemini / genai ClientError
             if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text or "Too Many Requests" in error_text:
                 retry_delay = 10.0
-                # Parse RetryInfo if in message
                 if "retryDelay" in error_text:
                     import re
                     match = re.search(r"([0-9]+(?:\.[0-9]+)?)s", error_text)
@@ -251,22 +209,15 @@ INSTRUCTIONS:
         parsed = {"status": "FAILED", "message": "LLM did not return output after retries", "raw": ""}
 
     if output is not None:
-        if isinstance(output, dict):
-            output = json.dumps(output, indent=2)
-
-        if isinstance(output, str) and "Agent stopped due to iteration limit" in output:
-            print("[gap_analysis_agent] WARNING: Agent stopped due to iteration limit/time limit. Marking as INCOMPLETE.")
-            parsed = {
-                "status": "INCOMPLETE",
-                "case_id": case_id,
-                "message": "LLM iteration/time limit reached; partial result may be available.",
-                "raw": output
-            }
-        else:
-            try:
-                parsed = json.loads(output)
-            except Exception:
-                parsed = {"raw": output}
+        # Strip markdown code fences if LLM wraps JSON in ```json ... ```
+        clean = output.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[-1]  # drop opening fence line
+            clean = clean.rsplit("```", 1)[0].strip()  # drop closing fence
+        try:
+            parsed = json.loads(clean)
+        except Exception:
+            parsed = {"raw": output}
 
     if isinstance(parsed, dict):
         summary = parsed.get("summary", {})
