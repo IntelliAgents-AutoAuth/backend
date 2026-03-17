@@ -20,6 +20,7 @@ if backend_dir not in sys.path:
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from utils.agent_logger import log_event
+from utils.llm_util import get_keys
 import time
 
 from prompts.eligibility_prompts import get_eligibility_prompt
@@ -31,16 +32,10 @@ from prompts.eligibility_prompts import get_eligibility_prompt
 _eligibility_chain = None
 
 
-def get_eligibility_chain():
-    """Lazy singleton — only spins up the LLM once."""
-    global _eligibility_chain
-    if _eligibility_chain is not None:
-        return _eligibility_chain
-
-    load_dotenv(os.path.join(backend_dir, ".env"))
-    api_key = os.getenv("GOOGLE_API_KEY")
+def get_eligibility_chain(api_key=None):
+    """Creates an eligibility chain using the provided API key (or default from env)."""
     if not api_key:
-        print("[eligibility_agent] WARNING: GOOGLE_API_KEY is not set.")
+        api_key = os.getenv("GOOGLE_API_KEY")
 
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
@@ -49,8 +44,7 @@ def get_eligibility_chain():
     )
 
     prompt = get_eligibility_prompt()
-    _eligibility_chain = prompt | llm
-    return _eligibility_chain
+    return prompt | llm
 
 
 # ─────────────────────────────────────────
@@ -111,7 +105,7 @@ def run_eligibility_check(props: dict) -> dict:
             backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
         )
 
-    chain = get_eligibility_chain()
+    all_keys = get_keys()
     agent_start = time.time()
 
     log_event(
@@ -165,12 +159,24 @@ def run_eligibility_check(props: dict) -> dict:
         )
         raw_ehr = fetch_extracted_data_by_case(case_id)
         ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
+
+        # ── 1.1 FORMAT UPLOADED EVIDENCE ─────────
+        uploaded_evidence = ""
+        if raw_ehr and "user_uploaded_files" in raw_ehr:
+            uploads = raw_ehr["user_uploaded_files"]
+            if uploads:
+                uploaded_evidence = "\n### NEWLY_UPLOADED_EVIDENCE:\n"
+                for i, up in enumerate(uploads, 1):
+                    name = up.get("document_name") or up.get("file_path", "Unknown File")
+                    text = up.get("extracted_text", "No text extracted.")
+                    uploaded_evidence += f"\n--- DOCUMENT {i}: {name} ---\n{text}\n"
+
         log_event(
             case_id     = case_id,
             agent_name  = "ELIGIBILITY_AGENT",
             event       = "EHR_FETCH_COMPLETED",
             status      = "SUCCESS",
-            message     = "EHR data fetched successfully",
+            message     = f"EHR data fetched. Evidence uploads: {len(raw_ehr.get('user_uploaded_files', [])) if raw_ehr else 0}",
             duration_ms = int((time.time() - ehr_start) * 1000)
         )
     except Exception as e:
@@ -182,6 +188,9 @@ def run_eligibility_check(props: dict) -> dict:
             message    = str(e)
         )
         print(f"[eligibility_agent] EHR Fetch failed: {e}")
+        raw_ehr = None
+        ehr_data = "ERROR: Failed to fetch EHR data."
+        uploaded_evidence = ""
 
     print(f"[eligibility_agent] Sending one-shot eligibility request to LLM for {case_id}...")
     llm_start = time.time()
@@ -193,7 +202,7 @@ def run_eligibility_check(props: dict) -> dict:
         message    = "Reasoning over policy and EHR"
     )
 
-    response = chain.invoke({
+    prompt_input = {
         "input": f"""
 Perform a final Policy Eligibility Check for {case_id}.
 
@@ -202,13 +211,50 @@ Perform a final Policy Eligibility Check for {case_id}.
 
 ### PATIENT_EHR:
 {ehr_data}
+{uploaded_evidence}
 
 INSTRUCTIONS:
-- Compare the PATIENT_EHR evidence against the POLICY_TEXT requirements.
+- Compare the PATIENT_EHR and NEWLY_UPLOADED_EVIDENCE against the POLICY_TEXT requirements.
 - Determine if the case is ELIGIBLE or NOT_ELIGIBLE.
 - Return a VERDICT and REASON following the strict sequence.
 """
-    })
+    }
+
+    response = None
+    success = False
+    
+    for key_index, current_key in enumerate(all_keys):
+        if success: break
+        
+        print(f"[eligibility_agent] Attempting LLM request with Key {key_index + 1}/{len(all_keys)}")
+        
+        try:
+            current_chain = get_eligibility_chain(api_key=current_key)
+            response = current_chain.invoke(prompt_input)
+            
+            print(f"[eligibility_agent] LLM verdict received (Key {key_index + 1})")
+            success = True
+            break
+        except Exception as e:
+            error_text = str(e)
+            print(f"[eligibility_agent] Key {key_index + 1} failed: {error_text}")
+            
+            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+                print(f"[eligibility_agent] Key {key_index + 1} exhausted. Switching next...")
+                continue
+            else:
+                print(f"[eligibility_agent] Fatal LLM error: {error_text}")
+                success = False
+                break
+                    
+    if not response:
+        # Fallback if everything failed
+        return {
+            "case_id": case_id,
+            "verdict": "NOT_ELIGIBLE",
+            "eligible": False,
+            "reason": "Eligibility check failed: API Quota exhausted or LLM error.",
+        }
     
     log_event(
         case_id     = case_id,

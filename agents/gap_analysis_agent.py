@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import json
+import asyncio
 
 # Add the backend directory to sys.path to ensure local imports work
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -11,6 +12,7 @@ if backend_dir not in sys.path:
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
+from utils.llm_util import get_keys
 
 from core.config import settings
 from constants.cases import CaseStatus
@@ -36,16 +38,11 @@ load_dotenv(os.path.join(backend_dir, ".env"))
 _llm_chain = None
 
 
-def get_llm_chain():
-    """Lazy initialization — LLM chain created once, reused for all calls."""
-    global _llm_chain
-    if _llm_chain is not None:
-        return _llm_chain
-
-    api_key = os.getenv("GOOGLE_API_KEY")
+def get_llm_chain(api_key=None):
+    """Creates an LLM chain using the provided API key (or default from env)."""
     if not api_key:
-        print("[gap_analysis_agent] WARNING: GOOGLE_API_KEY is not set.")
-
+        api_key = os.getenv("GOOGLE_API_KEY")
+    
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
         temperature=0,
@@ -53,8 +50,7 @@ def get_llm_chain():
     )
 
     prompt = get_gap_analysis_prompt()
-    _llm_chain = prompt | llm
-    return _llm_chain
+    return prompt | llm
 
 
 # ─────────────────────────────────────────
@@ -209,6 +205,16 @@ async def run_gap_analysis(props: dict) -> dict:
         print(f"[gap_analysis_agent] EHR Fetch failed: {e}")
 
     # ── 2. PREPARE INPUT ─────────────────────
+    uploaded_evidence = ""
+    if raw_ehr and isinstance(raw_ehr, dict):
+        uploads = raw_ehr.get("user_uploaded_files")
+        if uploads:
+            uploaded_evidence = "\n### NEWLY_UPLOADED_EVIDENCE:\n"
+            for i, up in enumerate(uploads, 1):
+                name = up.get("document_name") or up.get("file_path", "Unknown File")
+                text = up.get("extracted_text", "No text extracted.")
+                uploaded_evidence += f"\n--- DOCUMENT {i}: {name} ---\n{text}\n"
+
     agent_input = {
         "input": f"""
 Perform a Gap Analysis for {case_id}.
@@ -218,21 +224,21 @@ Perform a Gap Analysis for {case_id}.
 
 ### PATIENT_EHR:
 {ehr_data}
+{uploaded_evidence}
 
 INSTRUCTIONS:
 - Review the POLICY_TEXT for requirements.
-- Review the PATIENT_EHR for evidence.
+- Review the PATIENT_EHR and NEWLY_UPLOADED_EVIDENCE for evidence.
 - Return the structured Gap Analysis JSON.
 """
     }
 
     # ── 3. RUN LLM ───────────────────────────
     # Direct one-shot LLM call — no agent loop, no tools, no iteration limit.
-    print("[gap_analysis_agent] Sending one-shot request to LLM for gap analysis...")
-
+    all_keys = get_keys()
     output = None
     parsed = None
-
+    
     llm_start = time.time()
     log_event(
         case_id    = case_id,
@@ -242,47 +248,41 @@ INSTRUCTIONS:
         message    = "Sending to Gemini for gap analysis"
     )
 
-    for attempt in range(1, 4):
+    success = False
+    for key_index, current_key in enumerate(all_keys):
+        if success: break
+        
+        print(f"[gap_analysis_agent] Attempting LLM request with Key {key_index + 1}/{len(all_keys)}")
+        
         try:
-            response = await get_llm_chain().ainvoke(agent_input)
-            print(f"[gap_analysis_agent] LLM response received (attempt {attempt})")
-            # LangChain returns an AIMessage; get raw text content
+            # Create a fresh chain with the current key
+            chain = get_llm_chain(api_key=current_key)
+            response = await chain.ainvoke(agent_input)
+            
+            print(f"[gap_analysis_agent] LLM response received (Key {key_index + 1})")
             output = response.content if hasattr(response, "content") else str(response)
+            
             log_event(
                 case_id     = case_id,
                 agent_name  = "GAP_ANALYSIS_AGENT",
                 event       = "LLM_CALL_COMPLETED",
                 status      = "SUCCESS",
-                message     = "Gemini responded successfully",
+                message     = f"Gemini responded successfully using Key {key_index + 1}",
                 duration_ms = int((time.time() - llm_start) * 1000)
             )
+            success = True
             break
         except Exception as e:
             error_text = str(e)
-            print(f"[gap_analysis_agent] LLM request failed on attempt {attempt}: {error_text}")
+            print(f"[gap_analysis_agent] Key {key_index + 1} failed: {error_text}")
 
-            # Rate-limit handling for Gemini / genai ClientError
-            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text or "Too Many Requests" in error_text:
-                retry_delay = 10.0
-                if "retryDelay" in error_text:
-                    import re
-                    match = re.search(r"([0-9]+(?:\.[0-9]+)?)s", error_text)
-                    if match:
-                        retry_delay = float(match.group(1))
-                print(f"[gap_analysis_agent] Rate limit hit; retrying in {retry_delay}s...")
-                import asyncio
-                await asyncio.sleep(retry_delay)
-                continue
+            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+                print(f"[gap_analysis_agent] Key {key_index + 1} exhausted. Switching to next key...")
+                continue # Immediately try next key
             else:
-                print(f"[gap_analysis_agent] Non-retryable LLM error: {error_text}")
-                log_event(
-                    case_id    = case_id,
-                    agent_name = "GAP_ANALYSIS_AGENT",
-                    event      = "LLM_CALL_FAILED",
-                    status     = "FAILED",
-                    message    = error_text
-                )
-                parsed = {"status": "FAILED", "message": error_text, "raw": error_text}
+                # Non-retryable error
+                print(f"[gap_analysis_agent] Fatal LLM error: {error_text}")
+                success = False
                 break
 
     if output is None and parsed is None:

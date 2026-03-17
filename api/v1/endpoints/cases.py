@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form
 from datetime import datetime
 from fastapi.responses import FileResponse
 import traceback
+import os
+import shutil
 from typing import List
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from schemas.cases import Case as CaseSchema, CaseCreate
 from models.cases import Case
 from models.user import User
@@ -175,6 +178,62 @@ def _check_and_clear_gaps(db_case, case_id, db, background_tasks):
             diff = requirement_keys - uploaded_keys
             print(f"[api] Gaps still exist for {case_id}. Missing: {diff}")
 
+@router.post("/{case_id}/upload-file")
+async def upload_case_file(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    document_name: str = Form(...),
+    missing_key: str = Form(...),
+    field_value: str = Form(None),
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Real file upload endpoint that saves to uploads/{case_id}/."""
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    file_path = None
+    if file:
+        # 1. Create directory: uploads/{case_id}/
+        upload_dir = os.path.join("uploads", case_id)
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # 2. Save file
+        file_path = os.path.join(upload_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Convert to absolute path for the agent to find it easily
+        file_path = os.path.abspath(file_path)
+        print(f"[api] File saved to: {file_path}")
+
+    # 3. Update Case metadata
+    # Use list() to ensure we have a fresh copy, avoiding reference issues
+    files = list(db_case.uploaded_files) if db_case.uploaded_files else []
+    files.append({
+        "document_name": document_name,
+        "file_path": file_path,
+        "field_value": field_value,
+        "missing_key": missing_key,
+        "uploaded_at": datetime.now().isoformat(),
+        "uploaded_by": current_user.email,
+        "status": "UPLOADED"
+    })
+    db_case.uploaded_files = files
+    # Explicitly tell SQLAlchemy the field has changed
+    flag_modified(db_case, "uploaded_files")
+    
+    db.commit()
+    db.refresh(db_case)
+    
+    # 4. Check if all gaps cleared
+    _check_and_clear_gaps(db_case, case_id, db, background_tasks)
+    
+    return {"status": "SUCCESS", "file_path": file_path}
+
+
 @router.post("/{case_id}/upload")
 async def upload_case_document(
     case_id: str,
@@ -183,27 +242,8 @@ async def upload_case_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Single document upload."""
-    db_case = crud_case.get_case(db, case_id=case_id)
-    if not db_case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    
-    files = db_case.uploaded_files or []
-    files.append({
-        "document_name": file_info.get("document_name"),
-        "file_path": file_info.get("file_path"),
-        "field_value": file_info.get("field_value"),
-        "missing_key": file_info.get("missing_key"),
-        "uploaded_at": datetime.now().isoformat(),
-        "uploaded_by": current_user.email,
-        "status": "UPLOADED"
-    })
-    db_case.uploaded_files = files
-    db.commit()
-    db.refresh(db_case)
-    
-    _check_and_clear_gaps(db_case, case_id, db, background_tasks)
-    return {"status": "SUCCESS"}
+    """Legacy metadata-only upload (kept for compatibility)."""
+    return {"status": "DEPRECATED", "message": "Use /upload-file for real uploads."}
 
 @router.post("/{case_id}/bulk-upload")
 async def bulk_upload_case_documents(

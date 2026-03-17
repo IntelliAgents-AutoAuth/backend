@@ -14,6 +14,7 @@ import json
 import re
 from datetime import datetime
 from utils.agent_logger import log_event
+from utils.llm_util import get_keys
 import time
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,18 +39,14 @@ from tools.pdf_extractor import extract_raw_text
 
 _llm = None
 
-def _get_llm():
-    global _llm
-    if _llm:
-        return _llm
-    load_dotenv(os.path.join(backend_dir, ".env"))
-    api_key = os.getenv("GOOGLE_API_KEY")
-    _llm = ChatGoogleGenerativeAI(
+def _get_llm(api_key=None):
+    if not api_key:
+        api_key = os.getenv("GOOGLE_API_KEY")
+    return ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
         temperature=0.3,
         google_api_key=api_key,
     )
-    return _llm
 
 
 def _ehr_to_text(ehr: dict) -> str:
@@ -64,11 +61,23 @@ def _ehr_to_text(ehr: dict) -> str:
 
 
 def _invoke(prompt_template, variables: dict) -> str:
-    """Format a prompt template and call the LLM."""
-    llm = _get_llm()
+    """Format a prompt template and call the LLM with key rotation."""
+    all_keys = get_keys()
     messages = prompt_template.format_messages(**variables)
-    response = llm.invoke(messages)
-    return response.content.strip()
+    
+    for key_index, current_key in enumerate(all_keys):
+        try:
+            llm = _get_llm(api_key=current_key)
+            response = llm.invoke(messages)
+            return response.content.strip()
+        except Exception as e:
+            error_text = str(e)
+            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+                print(f"[pa_document_agent] Key {key_index + 1} exhausted. Switching next...")
+                continue
+            else:
+                raise e
+    raise Exception("All API keys exhausted or fatal error.")
 
 
 # ─────────────────────────────────────────
