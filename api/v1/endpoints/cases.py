@@ -7,12 +7,12 @@ import shutil
 from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from schemas.cases import Case as CaseSchema, CaseCreate
+from schemas.cases import Case as CaseSchema, CaseCreate, CaseFullDetails
 from models.cases import Case
 from models.user import User
 from core.security import get_current_user
 from api.deps import get_db
-from crud import crud_case
+from crud import crud_case, crud_ehr
 from crud.crud_extracted_data import get_extracted_data
 from services.extraction_service import fill_extracted_data_from_ehr
 from agents.gap_analysis_agent import run_gap_analysis
@@ -113,6 +113,40 @@ async def get_case_details(
             detail=f"Case with ID {case_id} not found"
         )
     return merge_ehr_data_into_case(db, db_case)
+
+
+@router.get("/{case_id}/full-details", response_model=CaseFullDetails)
+async def get_case_full_details(
+    case_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Fetch comprehensive details of a specific case, including:
+    - Case metadata
+    - Extracted AI data
+    - Patient EHR record
+    """
+    # 1. Get Case
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case with ID {case_id} not found"
+        )
+    
+    # 2. Get Extracted Data
+    db_extracted = get_extracted_data(db, case_id=case_id)
+    
+    # 3. Get EHR Record
+    db_ehr = crud_ehr.get_ehr(db, patient_id=db_case.patient_id)
+    
+    return {
+        "case": merge_ehr_data_into_case(db, db_case),
+        "extracted_data": db_extracted,
+        "ehr": db_ehr
+    }
+
 
 @router.get("/{case_id}/gap-analysis")
 async def get_case_gap_analysis(
