@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from typing import List
 from sqlalchemy.orm import Session
 from schemas.cases import Case as CaseSchema, CaseCreate
@@ -7,6 +7,8 @@ from models.user import User
 from core.security import get_current_user
 from api.deps import get_db
 from crud import crud_case
+from orchestrator.case_orchestrator import CaseOrchestrator
+from constants.cases import CaseStatus
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -45,3 +47,22 @@ async def get_case_details(
             detail=f"Case with ID {case_id} not found"
         )
     return db_case
+
+@router.post("/{case_id}/submit")
+async def submit_case_to_payer(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Triggers the final submission flow (Staff Approval -> Submitted -> Tracking).
+    """
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(status_code=404, detail="Case not found")
+        
+    orchestrator = CaseOrchestrator(case_id=case_id)
+    background_tasks.add_task(orchestrator.run, trigger="STAFF_APPROVED")
+    
+    return {"status": "SUCCESS", "message": "Case submission initiated."}
