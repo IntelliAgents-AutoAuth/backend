@@ -6,7 +6,7 @@ class ExtractedData(Base):
     __tablename__ = "extracted_data"
 
     # Primary Key and Foreign Key
-    case_id                   = Column(String(30), ForeignKey("cases.case_id"), primary_key=True)
+    case_id                   = Column(String(30), ForeignKey("cases.case_id", ondelete="CASCADE"), primary_key=True)
 
     # ── From EHR (filled at Step 3) ────────────────────────
     patient_id                = Column(String(50),  nullable=True)

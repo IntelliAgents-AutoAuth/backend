@@ -1,5 +1,33 @@
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+import os
+
+# ─────────────────────────────────────────
+# OBSERVABILITY (Arize Phoenix)
+# ─────────────────────────────────────────
+try:
+    import phoenix as px
+    from phoenix.otel import register
+    from openinference.instrumentation.langchain import LangChainInstrumentor
+    
+    # Launch Phoenix internally
+    if not px.active_session():
+        session = px.launch_app()
+        print(f"[observability] Phoenix dashboard launched: {session.url}")
+    else:
+        print(f"[observability] Phoenix dashboard already active.")
+    
+    # Use the phoenix.otel.register() helper to set up tracing
+    # This automatically configures the tracer provider to send to the local Phoenix instance
+    tracer_provider = register()
+    
+    # Instrument LangChain with the registered provider
+    LangChainInstrumentor().instrument(tracer_provider=tracer_provider, skip_dep_check=True)
+    print("[observability] LangChain instrumentation (via OTEL register) active globally.")
+except ImportError:
+    print("[observability] Phoenix or dependencies not installed, skipping.")
+except Exception as e:
+    print(f"[observability] Failed to initialize Phoenix: {e}")
 
 from api.v1.api import api_router
 from core.config import settings
@@ -9,9 +37,12 @@ from sqladmin import Admin, ModelView
 from models.user import User
 from models.ehr_records import EHR
 from models.cases import Case
-from models.extracted_data import ExtractedData
 
-# Create tables
+# Run migrations to update existing tables
+from scripts.migrate_db import migrate
+migrate()
+
+# Create tables (for new installations)
 Base.metadata.create_all(bind=engine)
 
 # Initialize DB with mock data
@@ -47,17 +78,10 @@ class EHRAdmin(ModelView, model=EHR):
     column_sortable_list = [EHR.created_at]
     icon = "fa-solid fa-hospital-user"
 
-class ExtractedDataAdmin(ModelView, model=ExtractedData):
-    column_list = [ExtractedData.case_id, ExtractedData.patient_id, ExtractedData.confidence_overall, ExtractedData.created_at]
-    column_searchable_list = [ExtractedData.case_id, ExtractedData.patient_id]
-    column_sortable_list = [ExtractedData.created_at]
-    icon = "fa-solid fa-microscope"
-
 admin = Admin(app, engine)
 admin.add_view(UserAdmin)
 admin.add_view(CaseAdmin)
 admin.add_view(EHRAdmin)
-admin.add_view(ExtractedDataAdmin)
 
 # Set all CORS enabled origins
 app.add_middleware(

@@ -1,72 +1,62 @@
+"""
+EHR Extraction Service
+
+Populates the extracted_data table with EHR records when a new case is created.
+"""
+
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone, date
-from typing import Optional
-import json
 
-from crud import crud_ehr, crud_extracted_data
-from schemas.extracted_data import ExtractedDataCreate, ExtractedDataUpdate
-from models.extracted_data import ExtractedData
+from crud.crud_ehr import get_ehr
+from crud.crud_extracted_data import create_extracted_data, get_extracted_data
+from schemas.extracted_data import ExtractedDataCreate
 
-def fill_extracted_data_from_ehr(db: Session, patient_id: str, case_id: str):
+
+def fill_extracted_data_from_ehr(db: Session, patient_id: str, case_id: str) -> None:
     """
-    Fetches details from EHR and populates/updates ExtractedData for a given case.
+    Look up the EHR record for *patient_id* and create an ExtractedData row
+    linked to *case_id*.  Does nothing if the EHR record cannot be found or if
+    an ExtractedData row already exists for this case.
     """
-    # 1. Fetch EHR Record
-    db_ehr = crud_ehr.get_ehr(db, patient_id=patient_id)
-    if not db_ehr:
-        return None
+    # Skip if already populated
+    if get_extracted_data(db, case_id):
+        return
 
-    # 2. Prepare Data Mapping
-    # Convert string date to date object if needed (EHR model uses String for DOB, ExtractedData uses Date)
-    dob = None
-    if db_ehr.date_of_birth:
-        try:
-            dob = datetime.strptime(db_ehr.date_of_birth, "%Y-%m-%d").date()
-        except ValueError:
-            pass
+    ehr = get_ehr(db, patient_id)
+    if not ehr:
+        # Fallback for demo data: Allow PA- prefix to match PT- records
+        if patient_id.startswith("PA-"):
+            fallback_id = "PT-" + patient_id[3:]
+            print(f"[extraction_service] ID {patient_id} not found. Trying fallback: {fallback_id}")
+            ehr = get_ehr(db, fallback_id)
+            
+    if not ehr:
+        print(f"[extraction_service] No EHR record found for patient_id={patient_id!r}")
+        return
 
-    # Extract BNP level from lab_results JSON if it exists
-    bnp_level = None
-    if db_ehr.lab_results and isinstance(db_ehr.lab_results, dict):
-        bnp_info = db_ehr.lab_results.get("BNP", {})
-        if isinstance(bnp_info, dict):
-            val = bnp_info.get("value")
-            if val:
-                try:
-                    bnp_level = float(val)
-                except ValueError:
-                    pass
+    payload = ExtractedDataCreate(
+        case_id=case_id,
+        patient_id=ehr.patient_id,
+        patient_first_name=ehr.patient_first_name,
+        patient_last_name=ehr.patient_last_name,
+        patient_dob=ehr.date_of_birth,
+        patient_gender=ehr.gender,
+        payer_name=ehr.insurance_company,
+        member_id=ehr.member_id,
+        policy_number=ehr.policy_number,
+        group_number=ehr.group_number,
+        plan_name=ehr.plan_name,
+        physician_name=ehr.physician_name,
+        physician_npi=ehr.physician_npi,
+        physician_specialty=ehr.physician_specialty,
+        facility_name=ehr.facility_name,
+        primary_icd10_code=ehr.icd10_code,
+        primary_diagnosis=ehr.diagnosis,
+        cpt_code=ehr.cpt_code,
+        lab_results=ehr.lab_results,
+        ehr_filled_at=datetime.now(timezone.utc),
+    )
 
-    # 3. Create or Update ExtractedData
-    existing_data = crud_extracted_data.get_extracted_data(db, case_id=case_id)
-    
-    extraction_in = {
-        "patient_id": db_ehr.patient_id,
-        "patient_first_name": db_ehr.patient_first_name,
-        "patient_last_name": db_ehr.patient_last_name,
-        "patient_dob": dob,
-        "patient_gender": db_ehr.gender,
-        "payer_name": db_ehr.insurance_company,
-        "member_id": db_ehr.member_id,
-        "policy_number": db_ehr.policy_number,
-        "group_number": db_ehr.group_number,
-        "plan_name": db_ehr.plan_name,
-        "physician_name": db_ehr.physician_name,
-        "physician_npi": db_ehr.physician_npi,
-        "physician_specialty": db_ehr.physician_specialty,
-        "facility_name": db_ehr.facility_name,
-        "primary_icd10_code": db_ehr.icd10_code,
-        "primary_diagnosis": db_ehr.diagnosis,
-        "cpt_code": db_ehr.cpt_code,
-        "lab_results": db_ehr.lab_results,
-        "bnp_level": bnp_level,
-        "ehr_filled_at": datetime.now(timezone.utc)
-    }
-
-    if existing_data:
-        update_schema = ExtractedDataUpdate(**extraction_in)
-        return crud_extracted_data.update_extracted_data(db, db_obj=existing_data, obj_in=update_schema)
-    else:
-        extraction_in["case_id"] = case_id
-        create_schema = ExtractedDataCreate(**extraction_in)
-        return crud_extracted_data.create_extracted_data(db, obj_in=create_schema)
+    print(f"[extraction_service] --- Data Extraction Started for {case_id} ---")
+    create_extracted_data(db, payload)
+    print(f"[extraction_service] --- Data Extraction Completed for {case_id} ---")

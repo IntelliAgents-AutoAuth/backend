@@ -9,15 +9,24 @@ from sqlalchemy import func
 def generate_case_id(db: Session):
     """
     Generate a case ID in the format PA-YYYYMMDD-XXXXX.
-    Counts cases created today to determine the next number.
+    Finds the max sequence number for today to determine the next number.
     """
     today = datetime.date.today()
     date_str = today.strftime("%Y%m%d")
     prefix = f"PA-{date_str}-"
     
-    # Count how many cases were created today
-    count = db.query(Case).filter(Case.case_id.like(f"{prefix}%")).count()
-    new_serial = count + 1
+    # Get the maximum case_id for today
+    max_case = db.query(Case).filter(Case.case_id.like(f"{prefix}%")).order_by(Case.case_id.desc()).first()
+    
+    if max_case:
+        # Extract the sequence number from the last 5 characters
+        try:
+            last_serial = int(max_case.case_id.split("-")[-1])
+            new_serial = last_serial + 1
+        except (ValueError, IndexError):
+            new_serial = 1
+    else:
+        new_serial = 1
     
     return f"{prefix}{new_serial:05d}"
 

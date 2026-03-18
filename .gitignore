@@ -33,3 +33,5 @@ logs/
 
 # Unnecessary Python files
 __init__.py
+# Case Uploaded Files (PHI)
+uploads/
