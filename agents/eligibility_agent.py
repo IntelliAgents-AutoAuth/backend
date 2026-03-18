@@ -38,7 +38,7 @@ def get_eligibility_chain(api_key=None):
         api_key = os.getenv("GOOGLE_API_KEY")
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         temperature=0,
         google_api_key=api_key,
     )
@@ -304,19 +304,11 @@ INSTRUCTIONS:
     finally:
         db.close()
 
-    # ── AUTO-CHAINING ────────────────────────
-    # Trigger document generation ONLY if approved
-    if parsed.get("eligible"):
-        print(f"[eligibility_agent] SUCCESS: Case {case_id} is eligible. Triggering Document Generation...")
-        from agents.pa_document_agent import generate_pa_content
-        try:
-            generate_pa_content(case_id=case_id, pdf_path=pdf_path)
-        except Exception as doc_err:
-            print(f"[eligibility_agent] Auto-chaining Document Agent failed: {doc_err}")
-
     return {
         "case_id": case_id,
-        **parsed,
+        "eligible": parsed.get("eligible"),
+        "verdict": parsed.get("verdict"),
+        "reason": parsed.get("reason"),
     }
 
 

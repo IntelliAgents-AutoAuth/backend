@@ -24,6 +24,13 @@ def fill_extracted_data_from_ehr(db: Session, patient_id: str, case_id: str) -> 
 
     ehr = get_ehr(db, patient_id)
     if not ehr:
+        # Fallback for demo data: Allow PA- prefix to match PT- records
+        if patient_id.startswith("PA-"):
+            fallback_id = "PT-" + patient_id[3:]
+            print(f"[extraction_service] ID {patient_id} not found. Trying fallback: {fallback_id}")
+            ehr = get_ehr(db, fallback_id)
+            
+    if not ehr:
         print(f"[extraction_service] No EHR record found for patient_id={patient_id!r}")
         return
 

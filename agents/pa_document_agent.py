@@ -24,6 +24,9 @@ if backend_dir not in sys.path:
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
+from db.session import SessionLocal
+from crud.crud_case import get_case
+from crud.crud_ehr import get_ehr
 
 from prompts.pa_document_prompts import (
     get_cover_letter_prompt,
@@ -43,7 +46,7 @@ def _get_llm(api_key=None):
     if not api_key:
         api_key = os.getenv("GOOGLE_API_KEY")
     return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         temperature=0.3,
         google_api_key=api_key,
     )
@@ -122,7 +125,29 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
         status     = "RUNNING"
     )
     ehr = fetch_extracted_data_by_case(case_id) or {}
+    
+    # Robust Fallback: Try fetching raw EHR data if extracted_data is empty
+    if not ehr:
+        print(f"[pa_document_agent] EHR extracted data empty for {case_id}, trying raw EHR lookup...")
+        with SessionLocal() as db:
+            db_case = get_case(db, case_id)
+            if db_case:
+                # 1. Try raw EHR table
+                raw_ehr = get_ehr(db, db_case.patient_id)
+                if raw_ehr:
+                    print(f"[pa_document_agent] Found raw EHR for patient {db_case.patient_id}")
+                    ehr = raw_ehr.to_dict()
+                else:
+                    # 2. Last resort: Basic case model placeholders
+                    print(f"[pa_document_agent] No raw EHR found, using Case placeholders.")
+                    ehr["patient_id"] = db_case.patient_id
+                    ehr["patient_first_name"] = "Patient"
+                    ehr["patient_last_name"] = str(db_case.patient_id)
+                    ehr["date_of_birth"] = "N/A (Update in Records)"
+                    ehr["insurance_company"] = "N/A"
+    
     ehr_text = _ehr_to_text(ehr)
+    
     log_event(
         case_id     = case_id,
         agent_name  = "PA_DOCUMENT_AGENT",

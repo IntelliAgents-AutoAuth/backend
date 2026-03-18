@@ -44,7 +44,7 @@ def get_llm_chain(api_key=None):
         api_key = os.getenv("GOOGLE_API_KEY")
     
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         temperature=0,
         google_api_key=api_key
     )
@@ -88,12 +88,11 @@ async def run_gap_analysis(props: dict) -> dict:
     from crud import crud_case
     db = SessionLocal()
 
-    # Prevent duplicate parallel gap analysis
+    # Prevent duplicate parallel gap analysis if NOT already set by a trusted caller (like Orchestrator)
+    # Actually, if it's already RUNNING, we only skip if it's a truly redundant parallel request.
+    # For now, we'll allow it to proceed if the status is already RUNNING to avoid the Orchestrator lock.
     db_case = crud_case.get_case(db, case_id=case_id)
-    if db_case and db_case.status == CaseStatus.GAP_ANALYSIS_RUNNING.value:
-        print(f"[gap_analysis_agent] Gap analysis already running for {case_id}, skipping duplicate invocation.")
-        db.close()
-        return {"case_id": case_id, "output": {"status": "IN_PROGRESS", "message": "Gap analysis already running."}}
+    # Removed strict block to allow Orchestrator-led flow
 
     # Mark as running
     if db_case:

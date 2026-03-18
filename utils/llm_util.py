@@ -36,7 +36,7 @@ class RobustLLM:
     """
     
     @staticmethod
-    def get_llm(model: str = "gemini-2.5-flash-lite", temperature: float = 0):
+    def get_llm(model: str = "gemini-2.5-flash", temperature: float = 0):
         keys = _get_api_keys()
         if not keys:
             print("[llm_util] ERROR: No Google API keys found in .env!")

@@ -70,6 +70,10 @@ def _styles():
             "checklist_header", fontSize=10, textColor=colors.white,
             fontName="Helvetica-Bold",
         ),
+        "table_cell": ParagraphStyle(
+            "table_cell", fontSize=9, textColor=DARK,
+            leading=12, spaceBefore=2, spaceAfter=2, alignment=TA_LEFT,
+        ),
     }
     return custom
 
@@ -115,20 +119,26 @@ def _build_cover_letter(story, styles, ehr: dict, cover_letter_text: str):
     story.append(Spacer(1, 0.15 * inch))
 
     # Patient info block
+    def _p(text): return Paragraph(str(text), s["table_cell"])
+    
     info_rows = [
-        ["Patient Name",  f"{ehr.get('patient_first_name','')} {ehr.get('patient_last_name','')}"],
-        ["Date of Birth",  ehr.get("patient_dob") or ehr.get("date_of_birth", "N/A")],
-        ["Insurance",      ehr.get("payer_name") or ehr.get("insurance_company", "N/A")],
-        ["Member ID",      ehr.get("member_id", "N/A")],
-        ["Policy Number",  ehr.get("policy_number", "N/A")],
-        ["CPT Code",       ehr.get("cpt_code", "N/A")],
-        ["ICD-10",         ehr.get("primary_icd10_code") or ehr.get("icd10_code", "N/A")],
-        ["Physician",      ehr.get("physician_name", "N/A")],
-        ["Physician NPI",  ehr.get("physician_npi", "N/A")],
-        ["Facility",       ehr.get("facility_name", "N/A")],
-        ["Date of Request", datetime.now().strftime("%B %d, %Y")],
+        ["Patient Name",  _p(f"{ehr.get('patient_first_name','')} {ehr.get('patient_last_name','')}").text], # Keep as text for simple keys if needed, but Paragraph is safer for values
+        ["Date of Birth",  _p(ehr.get("patient_dob") or ehr.get("date_of_birth", "N/A"))],
+        ["Insurance",      _p(ehr.get("payer_name") or ehr.get("insurance_company", "N/A"))],
+        ["Member ID",      _p(ehr.get("member_id", "N/A"))],
+        ["Policy Number",  _p(ehr.get("policy_number", "N/A"))],
+        ["CPT Code",       _p(ehr.get("cpt_code", "N/A"))],
+        ["ICD-10",         _p(ehr.get("primary_icd10_code") or ehr.get("icd10_code", "N/A"))],
+        ["Physician",      _p(ehr.get("physician_name", "N/A"))],
+        ["Physician NPI",  _p(ehr.get("physician_npi", "N/A"))],
+        ["Facility",       _p(ehr.get("facility_name", "N/A"))],
+        ["Date of Request", _p(datetime.now().strftime("%B %d, %Y"))],
     ]
-    tbl = Table(info_rows, colWidths=[2.0 * inch, 4.5 * inch])
+    
+    # Re-wrap labels as Paragraphs for consistency if needed, but labels are usually small
+    wrapped_rows = [[_p(row[0]), row[1]] for row in info_rows]
+    
+    tbl = Table(wrapped_rows, colWidths=[2.0 * inch, 4.5 * inch])
     tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, -1), LIGHT_BG),
         ("TEXTCOLOR",  (0, 0), (0, -1), GREY),
@@ -177,16 +187,20 @@ def _build_checklist(story, styles, checklist: list):
     story.append(Spacer(1, 0.15 * inch))
 
     # Header row
-    rows = [["Requirement", "Status", "Evidence"]]
+    rows = [[
+        Paragraph("Requirement", s["checklist_header"]),
+        Paragraph("Status", s["checklist_header"]),
+        Paragraph("Evidence", s["checklist_header"])
+    ]]
     for item in checklist:
         status_text = "✔ MET" if item.get("met") else "✘ MISSING"
         rows.append([
-            item.get("item", ""),
-            status_text,
-            item.get("evidence", ""),
+            Paragraph(item.get("item", ""), s["table_cell"]),
+            Paragraph(status_text, s["table_cell"]),
+            Paragraph(item.get("evidence", ""), s["table_cell"]),
         ])
 
-    tbl = Table(rows, colWidths=[2.5 * inch, 0.9 * inch, 3.1 * inch])
+    tbl = Table(rows, colWidths=[2.4 * inch, 0.9 * inch, 3.2 * inch])
     style_cmds = [
         # Header
         ("BACKGROUND",    (0, 0), (-1, 0), PRIMARY),
@@ -227,9 +241,17 @@ def _build_attached_docs(story, styles, uploaded_file_paths: List[str]):
     story.append(Paragraph("The following documents are attached to this package:", s["body"]))
     story.append(Spacer(1, 0.1 * inch))
 
-    rows = [["#", "Document Name", "File"]]
+    rows = [[
+        Paragraph("#", s["checklist_header"]),
+        Paragraph("Document Name", s["checklist_header"]),
+        Paragraph("File", s["checklist_header"])
+    ]]
     for i, path in enumerate(uploaded_file_paths, 1):
-        rows.append([str(i), Path(path).stem.replace("_", " ").title(), Path(path).name])
+        rows.append([
+            Paragraph(str(i), s["table_cell"]),
+            Paragraph(Path(path).stem.replace("_", " ").title(), s["table_cell"]),
+            Paragraph(Path(path).name, s["table_cell"])
+        ])
 
     tbl = Table(rows, colWidths=[0.4 * inch, 3.5 * inch, 2.6 * inch])
     tbl.setStyle(TableStyle([
