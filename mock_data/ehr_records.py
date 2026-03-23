@@ -36,69 +36,124 @@ MOCK_EHR_RECORDS = [
         "created_at":          datetime.datetime(2026, 3, 1, 9, 0, 0),
         "updated_at":          datetime.datetime(2026, 3, 1, 9, 0, 0)
     },
+{
+    # PT-002 — FULLY COMPLETE
+    # All fields present including uploaded docs
+    # Gap Analysis should find ZERO missing items
+    # Agent proceeds directly to Eligibility ✅
 
-    {
-        # PT-002 — COMPLETE
-        # All fields present
-        # Agent should proceed without asking anything
-        "patient_id":          "PT-002",
-        "patient_first_name":  "Jane",
-        "patient_last_name":   "Smith",
-        "date_of_birth":       "1972-11-03",
-        "gender":              "Female",
-        "insurance_company":   "United Healthcare",
-        "member_id":           "UHC-991234",
-        "policy_number":       "UHC-POL-2026-002",
-        "group_number":        "GRP-7721",
-        "plan_name":           "UHC Gold Plus",
-        "icd10_code":          "E11.65",
-        "diagnosis":           "Type 2 Diabetes with Hyperglycemia",
-        "cpt_code":            "95251",
-        "procedure_name":      "Continuous Glucose Monitoring System",
-        "physician_name":      "Dr. Priya Nair",
-        "physician_npi":       "9876543210",
-        "physician_specialty": "Endocrinology",
-        "facility_name":       "Metro Diabetes Clinic",
-        "lab_results": {
-            "HbA1c":           {"value": "8.2",  "unit": "%"},
-            "Fasting Glucose": {"value": "180",  "unit": "mg/dL"}
+    "patient_id":          "PT-002",
+    "patient_first_name":  "Jane",
+    "patient_last_name":   "Smith",
+    "date_of_birth":       "1972-11-03",
+    "gender":              "Female",
+
+    # ── Insurance ──────────────────────────
+    "insurance_company":   "United Healthcare",
+    "member_id":           "UHC-991234",
+    "policy_number":       "UHC-POL-2026-002",
+    "group_number":        "GRP-7721",
+    "plan_name":           "UHC Gold Plus",
+
+    # ── Clinical ───────────────────────────
+    "icd10_code":          "E11.65",
+    "diagnosis":           "Type 2 Diabetes with Hyperglycemia",
+    "cpt_code":            "95251",
+    "procedure_name":      "Continuous Glucose Monitoring System",
+
+    # ── Physician ──────────────────────────
+    "physician_name":      "Dr. Priya Nair",
+    "physician_npi":       "9876543210",
+    "physician_specialty": "Endocrinology",
+    "facility_name":       "Metro Diabetes Clinic",
+
+    # ── Lab Results ────────────────────────
+    # Policy asks for HbA1c + Fasting Glucose
+    # Both present and above threshold ✅
+    "lab_results": {
+        "HbA1c": {
+            "value": "8.2",
+            "unit":  "%",
+            "date":  "2026-02-15",
+            "lab":   "Metro Diabetes Clinic Lab",
+            "reference_range": "Normal below 7.0%",
+            "flag":  "HIGH"
         },
-        "created_at":          datetime.datetime(2026, 3, 1, 9, 0, 0),
-        "updated_at":          datetime.datetime(2026, 3, 1, 9, 0, 0)
+        "Fasting_Glucose": {
+            "value": "180",
+            "unit":  "mg/dL",
+            "date":  "2026-02-28",
+            "lab":   "Metro Diabetes Clinic Lab",
+            "reference_range": "Normal 70-99 mg/dL",
+            "flag":  "HIGH"
+        }
     },
 
-    # ─────────────────────────────────────────
-    # INCOMPLETE RECORDS — Gaps present
-    # Agent must detect and request upload
-    # ─────────────────────────────────────────
-
-    {
-        # PT-003 — MISSING lab results
-        # Agent must ask to upload lab report
-        "patient_id":          "PT-003",
-        "patient_first_name":  "Alice",
-        "patient_last_name":   "Johnson",
-        "date_of_birth":       "1960-03-25",
-        "gender":              "Female",
-        "insurance_company":   "Cigna",
-        "member_id":           "CIG-100234",
-        "policy_number":       "CIG-POL-2026-003",
-        "group_number":        "GRP-3310",
-        "plan_name":           "Cigna Open Access Plus",
-        "icd10_code":          "I25.10",
-        "diagnosis":           "Atherosclerotic heart disease",
-        "cpt_code":            "33533",
-        "procedure_name":      "Coronary Artery Bypass Graft x3",
-        "physician_name":      "Dr. Ramesh Kumar",
-        "physician_npi":       "1234567890",
-        "physician_specialty": "Cardiothoracic Surgery",
-        "facility_name":       "Heart Care Institute",
-        "lab_results":         {},
-        # MISSING — agent must detect and request
-        # lab_results → empty
-        "created_at":          datetime.datetime(2026, 3, 1, 9, 0, 0),
-        "updated_at":          datetime.datetime(2026, 3, 1, 9, 0, 0)
+    # ── Clinical Justification ─────────────
+    # Policy asks for clinical justification note
+    # Provided as text so agent finds it ✅
+    "clinical_justification": {
+        "note": """Patient Jane Smith presents with 
+                   Type 2 Diabetes Mellitus with 
+                   Hyperglycemia (E11.65). HbA1c of 
+                   8.2% despite 12 months of oral 
+                   medication therapy. Fasting glucose 
+                   consistently above 150 mg/dL. 
+                   Standard fingerstick monitoring 
+                   insufficient to manage glucose 
+                   variability. CGM medically necessary 
+                   for real-time glucose management 
+                   and hypoglycemia prevention.""",
+        "physician": "Dr. Priya Nair",
+        "npi":       "9876543210",
+        "specialty": "Endocrinology",
+        "date":      "2026-03-01",
+        "signed":    True
     },
+
+    # ── Physician Order ────────────────────
+    # Policy asks for physician order letter
+    # Provided as structured data ✅
+    "physician_order": {
+        "procedure":    "Continuous Glucose Monitoring System",
+        "cpt_code":     "95251",
+        "icd10_code":   "E11.65",
+        "physician":    "Dr. Priya Nair",
+        "npi":          "9876543210",
+        "facility":     "Metro Diabetes Clinic",
+        "date":         "2026-03-01",
+        "signed":       True,
+        "letterhead":   True
+    },
+
+    # ── Prior Treatment Records ────────────
+    # Shows 12 months of medication history ✅
+    "prior_treatment_records": [
+        {
+            "medication":  "Metformin",
+            "dose":        "1000mg",
+            "frequency":   "twice daily",
+            "start_date":  "2025-01-01",
+            "end_date":    "ongoing",
+            "duration":    "15 months",
+            "response":    "Partial — HbA1c improved from 9.5% to 8.2% but glucose variability persists",
+            "status":      "CURRENT"
+        },
+        {
+            "medication":  "Glipizide",
+            "dose":        "5mg",
+            "frequency":   "once daily",
+            "start_date":  "2025-03-01",
+            "end_date":    "2025-09-01",
+            "duration":    "6 months",
+            "response":    "Discontinued — hypoglycemic episodes reported",
+            "status":      "DISCONTINUED"
+        }
+    ],
+
+    "created_at": datetime.datetime(2026, 3, 1, 9, 0, 0),
+    "updated_at": datetime.datetime(2026, 3, 1, 9, 0, 0)
+},
 
     {
         # PT-004 — MISSING physician specialty + insurance details
