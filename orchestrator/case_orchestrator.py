@@ -353,10 +353,65 @@ class CaseOrchestrator:
         return {"event": "AWAITING_STAFF"}
 
     async def _step_submit(self, db: Session, db_case) -> dict:
-        """Step 6 — Submit the PA package to the payer."""
-        db_case.status = CaseStatus.SUBMITTED.value
-        db.add(db_case)
-        db.commit()
+        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting package to insurance portal")
+        
+        try:
+            # Get the path to the generated PDF
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            output_dir = os.path.join(backend_dir, "uploads", "generated")
+            files = [f for f in os.listdir(output_dir) if f.startswith(f"PA_{self.case_id}_") and f.endswith(".pdf")]
+            
+            if not files:
+                raise Exception("Cannot submit: No generated PDF package found.")
+            
+            files.sort(reverse=True)
+            latest_pdf_path = os.path.join(output_dir, files[0])
+            
+            # Send HTTP request to local payer endpoint
+            import httpx
+            
+            # Using httpx.AsyncClient since we are in an async function
+            async with httpx.AsyncClient() as client:
+                with open(latest_pdf_path, "rb") as pdf_file:
+                    files_payload = {
+                        "package_pdf": (os.path.basename(latest_pdf_path), pdf_file, "application/pdf")
+                    }
+                    
+                    from tools.ehr_fetcher import fetch_extracted_data_by_case
+                    ext_data = fetch_extracted_data_by_case(str(db_case.case_id), extract_pdf_text=False) or {}
+                    p_name = f"{ext_data.get('patient_first_name') or ''} {ext_data.get('patient_last_name') or ''}".strip()
+                    if not p_name:
+                        p_name = f"Patient {db_case.patient_id}"
+                    diag = ext_data.get("primary_diagnosis") or ext_data.get("diagnosis") or db_case.icd10_code or ""
+                    
+                    data_payload = {
+                        "case_id": str(db_case.case_id),
+                        "patient_name": str(p_name),
+                        "cpt_code": str(ext_data.get('cpt_code') or db_case.cpt_code or ""),
+                        "diagnosis": str(diag)
+                    }
+                    
+                    response = await client.post(
+                        "http://localhost:8000/api/v1/payer/submissions",
+                        data=data_payload,
+                        files=files_payload,
+                        timeout=30.0
+                    )
+                    response.raise_for_status()
+            
+            # 2. Transition to TRACKING
+            db_case.status = CaseStatus.TRACKING.value
+            db.add(db_case)
+            db.commit()
+            
+            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_COMPLETE", "SUCCESS", "Package accepted by payer. Now tracking status.")
+            
+        except Exception as e:
+            logger.error(f"[orchestrator] Submission failed: {e}")
+            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_FAILED", "FAILED", str(e))
+            db_case.status = CaseStatus.FAILED.value
+            db.add(db_case)
+            db.commit()
         log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting to payer")
 
         await asyncio.sleep(2)  # Simulated network latency

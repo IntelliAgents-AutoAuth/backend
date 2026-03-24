@@ -15,7 +15,7 @@ from schemas.extracted_data import ExtractedData as ExtractedDataSchema
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def fetch_extracted_data_by_case(case_id: str) -> Optional[Dict[str, Any]]:
+def fetch_extracted_data_by_case(case_id: str, extract_pdf_text: bool = True) -> Optional[Dict[str, Any]]:
     """Query the `extracted_data` table for a given case_id.
 
     Args:
@@ -72,7 +72,7 @@ def fetch_extracted_data_by_case(case_id: str) -> Optional[Dict[str, Any]]:
                         file_path = found_path
                         print(f"[ehr_fetcher] Found fallback file: {file_path}")
 
-                if file_path and os.path.exists(file_path) and file_path.lower().endswith(".pdf"):
+                if extract_pdf_text and file_path and os.path.exists(file_path) and file_path.lower().endswith(".pdf"):
                     try:
                         print(f"[ehr_fetcher] Extracting text from uploaded file: {file_path}")
                         extracted_text = extract_raw_text(file_path)
@@ -81,7 +81,7 @@ def fetch_extracted_data_by_case(case_id: str) -> Optional[Dict[str, Any]]:
                     except Exception as e:
                         print(f"[ehr_fetcher] Failed to extract text from {file_path}: {e}")
                         upload_data["extracted_text"] = f"ERROR: Extraction failed - {str(e)}"
-                else:
+                elif extract_pdf_text:
                     # Provide specific reasons why extraction was skipped
                     if not file_path:
                         upload_data["extracted_text"] = "SKIPPED: No file path provided in upload metadata."
@@ -91,6 +91,8 @@ def fetch_extracted_data_by_case(case_id: str) -> Optional[Dict[str, Any]]:
                         upload_data["extracted_text"] = f"SKIPPED: File type not supported for extraction: {os.path.splitext(file_path)[1]}"
                     else:
                         upload_data["extracted_text"] = "SKIPPED: Unknown reason (check logs)."
+                else:
+                    upload_data["extracted_text"] = "SKIPPED: API read mode (extract_pdf_text=False)"
                 
                 processed_uploads.append(upload_data)
                 
