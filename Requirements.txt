@@ -6,3 +6,14 @@ passlib[bcrypt]
 python-multipart
 pydantic-settings
 sqladmin
+langchain
+langchain-community
+langchain-google-genai
+langchain-openai
+pdfplumber
+reportlab
+pypdf
+python-dotenv
+openinference-instrumentation-langchain
+arize-phoenix
+pypdf
