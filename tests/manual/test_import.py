@@ -2,7 +2,7 @@ import os
 import sys
 
 # Add the backend directory to sys.path
-backend_path = os.path.dirname(os.path.abspath(__file__))
+backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(backend_path)
 
 try:

@@ -12,7 +12,7 @@ if backend_dir not in sys.path:
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
-from utils.llm_util import get_keys
+from utils.llm_util import get_keys, get_model_order
 
 from core.config import settings
 from constants.cases import CaseStatus
@@ -38,13 +38,15 @@ load_dotenv(os.path.join(backend_dir, ".env"))
 _llm_chain = None
 
 
-def get_llm_chain(api_key=None):
+def get_llm_chain(api_key=None, model_name: str | None = None):
     """Creates an LLM chain using the provided API key (or default from env)."""
     if not api_key:
         api_key = os.getenv("GOOGLE_API_KEY")
+    if not model_name:
+        model_name = get_model_order("gap_analysis")[0]
     
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model=model_name,
         temperature=0,
         google_api_key=api_key
     )
@@ -89,10 +91,18 @@ async def run_gap_analysis(props: dict) -> dict:
     db = SessionLocal()
 
     # Prevent duplicate parallel gap analysis if NOT already set by a trusted caller (like Orchestrator)
-    # Actually, if it's already RUNNING, we only skip if it's a truly redundant parallel request.
-    # For now, we'll allow it to proceed if the status is already RUNNING to avoid the Orchestrator lock.
+    # If already running, short-circuit to avoid duplicate concurrent executions.
     db_case = crud_case.get_case(db, case_id=case_id)
-    # Removed strict block to allow Orchestrator-led flow
+    if db_case and db_case.status == CaseStatus.GAP_ANALYSIS_RUNNING.value:
+        db.close()
+        print(f"[gap_analysis_agent] Skipping duplicate run for {case_id}: analysis already running.")
+        return {
+            "case_id": case_id,
+            "output": {
+                "status": "RUNNING",
+                "message": "Gap analysis already in progress"
+            }
+        }
 
     # Mark as running
     if db_case:
@@ -262,42 +272,37 @@ INSTRUCTIONS:
         message    = "Sending to Gemini for gap analysis"
     )
 
-    success = False
+    model_order = get_model_order("gap_analysis")
     for key_index, current_key in enumerate(all_keys):
-        if success: break
-        
-        print(f"[gap_analysis_agent] Attempting LLM request with Key {key_index + 1}/{len(all_keys)}")
-        
-        try:
-            # Create a fresh chain with the current key
-            chain = get_llm_chain(api_key=current_key)
-            response = await chain.ainvoke(agent_input)
-            
-            print(f"[gap_analysis_agent] LLM response received (Key {key_index + 1})")
-            output = response.content if hasattr(response, "content") else str(response)
-            
-            log_event(
-                case_id     = case_id,
-                agent_name  = "GAP_ANALYSIS_AGENT",
-                event       = "LLM_CALL_COMPLETED",
-                status      = "SUCCESS",
-                message     = f"Gemini responded successfully using Key {key_index + 1}",
-                duration_ms = int((time.time() - llm_start) * 1000)
-            )
-            success = True
-            break
-        except Exception as e:
-            error_text = str(e)
-            print(f"[gap_analysis_agent] Key {key_index + 1} failed: {error_text}")
+        print(f"[gap_analysis_agent] Trying key {key_index + 1}/{len(all_keys)}")
+        for model_name in model_order:
+            print(f"[gap_analysis_agent] Attempting LLM request with key={key_index + 1}/{len(all_keys)}, model={model_name}")
+            try:
+                # Create a fresh chain with the current key/model
+                chain = get_llm_chain(api_key=current_key, model_name=model_name)
+                response = await chain.ainvoke(agent_input)
 
-            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-                print(f"[gap_analysis_agent] Key {key_index + 1} exhausted. Switching to next key...")
-                continue # Immediately try next key
-            else:
-                # Non-retryable error
-                print(f"[gap_analysis_agent] Fatal LLM error: {error_text}")
-                success = False
+                print(f"[gap_analysis_agent] LLM response received (model={model_name}, key={key_index + 1})")
+                output = response.content if hasattr(response, "content") else str(response)
+
+                log_event(
+                    case_id     = case_id,
+                    agent_name  = "GAP_ANALYSIS_AGENT",
+                    event       = "LLM_CALL_COMPLETED",
+                    status      = "SUCCESS",
+                    message     = f"Gemini responded successfully using model={model_name}, key={key_index + 1}",
+                    duration_ms = int((time.time() - llm_start) * 1000)
+                )
                 break
+            except Exception as e:
+                error_text = str(e)
+                print(f"[gap_analysis_agent] model={model_name}, key={key_index + 1} failed: {error_text}")
+                if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+                    print(f"[gap_analysis_agent] model={model_name} exhausted on key {key_index + 1}. Trying next model on same key...")
+                    continue
+                continue
+        if output is not None:
+            break
 
     if output is None and parsed is None:
         parsed = {"status": "FAILED", "message": "LLM did not return output after retries", "raw": ""}
@@ -416,9 +421,9 @@ INSTRUCTIONS:
 # ─────────────────────────────────────────
 
 if __name__ == "__main__":
-    result = run_gap_analysis({
+    result = asyncio.run(run_gap_analysis({
         "case_id":      "CASE_001",
         "patient_name": "John Smith",
         "pdf_path":     None
-    })
+    }))
     print(result)

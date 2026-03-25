@@ -14,9 +14,13 @@ Your goal is to coordinate multiple agents and services to move a medical case f
 2. **Sequential Flow**: Generally, follow this order: EHR Fetch -> Gap Analysis -> Eligibility -> Packet Generation -> Pending Approval.
 3. **External Triggers**:
    - If `DOCUMENTS_UPLOADED` occurs, you might need to re-run `eligibility` or `gap_analysis` if they failed before.
+  - If `ELIGIBILITY_REQUESTED` occurs, route to `eligibility`.
    - If `STAFF_APPROVED` occurs, the next step is `submit`.
+  - If `SYNC_REQUESTED` occurs, start from `ehr_fetch`.
+  - If `GENERATE_PACKET_REQUESTED` occurs, choose `packet_gen` only if eligibility is already approved; otherwise route to the required prerequisite step.
 4. **Failure Handling**: If a step failed, analyze the error and decide if a retry or a different step is needed.
 5. **Efficiency**: Use the history to avoid redundant work.
+6. **Routing Safety**: Do not skip required prerequisites. If the current state is not valid for a processing step, return the prerequisite step or return `next_step: null`.
 
 ### RESPONSE FORMAT
 You must respond in valid JSON with the following structure:

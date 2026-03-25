@@ -6,6 +6,7 @@ from constants.cases import CaseStatus
 class Case(Base):
     __tablename__ = "cases"
     case_id           = Column(String(30), primary_key=True)
+    patient_name      = Column(String(150), nullable=True)
     patient_id        = Column(String(50), nullable=False)
     status            = Column(String(30), nullable=False, default=CaseStatus.DRAFT.value)
     created_by        = Column(String(50), ForeignKey("user.email"), nullable=False)

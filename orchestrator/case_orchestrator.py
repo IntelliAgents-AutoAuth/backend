@@ -39,10 +39,14 @@ from agents.eligibility_agent import run_eligibility_check
 from agents.pa_document_agent import generate_pa_content
 from services.pdf_generator import generate_pa_pdf
 from utils.agent_logger import log_event
+from utils.llm_util import get_keys, get_model_order
 from orchestrator.memory import OrchestratorMemory
-from orchestrator.orchestrator_prompts import ORCHESTRATOR_SYSTEM_PROMPT, CONTEXT_TEMPLATE
+from prompts.orchestrator_prompts import ORCHESTRATOR_SYSTEM_PROMPT, CONTEXT_TEMPLATE
 
 logger = logging.getLogger(__name__)
+
+# Process-local lock table to avoid concurrent duplicate runs for same case.
+_CASE_RUN_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -89,9 +93,24 @@ class CaseOrchestrator:
     def __init__(self, case_id: str):
         self.case_id = case_id
         self.memory = OrchestratorMemory(case_id)
+        self._max_steps = 10
 
     def _get_db(self):
         return SessionLocal()
+
+    def _should_rerun_step(self, step: str, trigger: str) -> bool:
+        """
+        Decide whether a previously successful step should be rerun for this trigger.
+        """
+        if trigger == "DOCUMENTS_UPLOADED" and step in {"gap_analysis", "eligibility"}:
+            return True
+        if trigger == "ELIGIBILITY_REQUESTED" and step == "eligibility":
+            return True
+        if trigger == "SYNC_REQUESTED" and step in {"ehr_fetch", "gap_analysis"}:
+            return True
+        if trigger == "GENERATE_PACKET_REQUESTED" and step == "packet_gen":
+            return True
+        return False
 
     # ─────────────────────────────────────────
     # PUBLIC ENTRY POINT
@@ -102,11 +121,23 @@ class CaseOrchestrator:
         Single entry point for all external triggers:
           - "CASE_CREATED"
           - "DOCUMENTS_UPLOADED"
+                    - "ELIGIBILITY_REQUESTED"
           - "STAFF_APPROVED"
+                    - "SYNC_REQUESTED"
+                    - "GENERATE_PACKET_REQUESTED"
           - "RETRY"
         """
         payload = payload or {}
         db = self._get_db()
+        case_lock = _CASE_RUN_LOCKS.setdefault(self.case_id, asyncio.Lock())
+
+        if case_lock.locked() and trigger != "RETRY":
+            logger.info(
+                f"[orchestrator] Ignoring trigger '{trigger}' for {self.case_id}: run already in progress."
+            )
+            return
+
+        await case_lock.acquire()
 
         try:
             db_case = crud_case.get_case(db, case_id=self.case_id)
@@ -122,6 +153,19 @@ class CaseOrchestrator:
                 f"Memory so far: {self.memory.summary()}"
             )
 
+            in_progress_statuses = {
+                CaseStatus.EHR_FETCHING.value,
+                CaseStatus.GAP_ANALYSIS_RUNNING.value,
+                CaseStatus.ELIGIBILITY_RUNNING.value,
+                CaseStatus.PACKET_GENERATING.value,
+            }
+            if trigger != "RETRY" and db_case.status in in_progress_statuses:
+                logger.info(
+                    f"[orchestrator] Ignoring trigger '{trigger}' for {self.case_id}: "
+                    f"case is already in-progress with status={db_case.status}."
+                )
+                return
+
             if trigger == "RETRY":
                 await self._handle_retry(db, db_case, payload)
                 return
@@ -133,17 +177,26 @@ class CaseOrchestrator:
             thinking = decision.get("thinking", "No explanation provided.")
 
             # State machine loop
+            executed_steps = 0
             while current_step:
+                executed_steps += 1
+                if executed_steps > self._max_steps:
+                    logger.error(
+                        f"[orchestrator] Safety stop for {self.case_id}: exceeded max steps ({self._max_steps})."
+                    )
+                    break
+
                 # Skip steps the orchestrator already successfully completed
-                if self.memory.succeeded(current_step):
+                if self.memory.succeeded(current_step) and not self._should_rerun_step(current_step, trigger):
                     logger.info(f"[orchestrator] Skipping '{current_step}' — already ran successfully.")
                     prior_result = self.memory.get_last_result(current_step)
                     event = prior_result.get("event", "") if prior_result else ""
                     db.refresh(db_case)
-                    
-                    decision = await self._resolve_next_step_llm(db, db_case, event, payload)
-                    current_step = decision.get("next_step")
-                    thinking = decision.get("thinking", "Skipped step, next step decided.")
+
+                    # Use deterministic transition after a successful prior step to avoid
+                    # repeated LLM supervisor calls for already-completed paths.
+                    current_step = self._resolve_next_step(event, db_case.status)
+                    thinking = "Skipped previously successful step; advanced using deterministic transition."
                     continue
 
                 logger.info(f"[orchestrator] Executing step: '{current_step}' | Thinking: {thinking}")
@@ -192,6 +245,8 @@ class CaseOrchestrator:
                 pass
         finally:
             db.close()
+            if case_lock.locked():
+                case_lock.release()
 
     # ─────────────────────────────────────────
     # LLM SUPERVISOR RESOLVER
@@ -205,8 +260,8 @@ class CaseOrchestrator:
         Returns {"thinking": str, "next_step": str | None}
         """
         try:
-            # Initialize LLM (Gemini)
-            llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp")
+            # Model order is centrally managed in utils.llm_util
+            model_order = get_model_order("orchestrator_supervisor")
 
             # Prepare Step Registry Description
             step_registry_desc = "\n".join(
@@ -230,11 +285,40 @@ class CaseOrchestrator:
                 history_summary=history_summary,
             )
 
-            logger.info(f"[orchestrator] Calling Supervisor LLM for decision on {self.case_id}...")
-            response = await llm.ainvoke([
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": context_msg}
-            ])
+            logger.info(
+                f"[orchestrator] Calling Supervisor LLM for decision on {self.case_id} "
+                f"with fallback order: {model_order}"
+            )
+
+            all_keys = get_keys()
+            response = None
+            last_model_error = None
+
+            if not all_keys:
+                raise RuntimeError("No GOOGLE_API_KEY values found for orchestrator supervisor.")
+
+            for key_index, api_key in enumerate(all_keys):
+                for model_name in model_order:
+                    try:
+                        llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key)
+                        response = await llm.ainvoke([
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": context_msg}
+                        ])
+                        logger.info(
+                            f"[orchestrator] Supervisor LLM used key {key_index + 1}/{len(all_keys)} with model: {model_name}"
+                        )
+                        break
+                    except Exception as model_err:
+                        last_model_error = model_err
+                        logger.warning(
+                            f"[orchestrator] Supervisor failed on key {key_index + 1}/{len(all_keys)} model '{model_name}': {model_err}. Trying next model..."
+                        )
+                if response is not None:
+                    break
+
+            if response is None:
+                raise RuntimeError(f"All orchestrator models failed. Last error: {last_model_error}")
 
             # Parse JSON response
             content = response.content.strip()
@@ -249,6 +333,24 @@ class CaseOrchestrator:
             if step and step not in STEP_REGISTRY:
                 logger.warning(f"[orchestrator] LLM suggested unknown step: {step}. Falling back to None.")
                 decision["next_step"] = None
+
+            # Trigger-aware guardrail: use deterministic first-step for external trigger entry points.
+            external_triggers = {
+                "CASE_CREATED",
+                "SYNC_REQUESTED",
+                "DOCUMENTS_UPLOADED",
+                "ELIGIBILITY_REQUESTED",
+                "STAFF_APPROVED",
+                "GENERATE_PACKET_REQUESTED",
+            }
+            if last_event in external_triggers:
+                fallback_step = self._resolve_next_step(last_event, db_case.status)
+                if decision.get("next_step") != fallback_step:
+                    logger.warning(
+                        f"[orchestrator] For trigger '{last_event}', overriding LLM step "
+                        f"'{decision.get('next_step')}' with deterministic step '{fallback_step}'."
+                    )
+                    decision["next_step"] = fallback_step
                 
             return decision
 
@@ -268,10 +370,15 @@ class CaseOrchestrator:
         # Hardcoded fallback logic since we removed the global TRANSITIONS constant
         FALLBACK_MAP = {
             ("CASE_CREATED",       None):                               "ehr_fetch",
+            ("SYNC_REQUESTED",     None):                               "ehr_fetch",
             ("EHR_FETCH_DONE",     CaseStatus.EHR_FETCHED.value):      "gap_analysis",
             ("GAP_CLEARED",        CaseStatus.GAP_CLEARED.value):      "eligibility",
+            ("DOCUMENTS_UPLOADED", CaseStatus.GAP_FOUND.value):        "gap_analysis",
             ("DOCUMENTS_UPLOADED", CaseStatus.GAP_CLEARED.value):      "eligibility",
+            ("ELIGIBILITY_REQUESTED", None):                           "eligibility",
             ("ELIGIBLE",           "APPROVED"):                         "packet_gen",
+            ("GENERATE_PACKET_REQUESTED", CaseStatus.APPROVED.value):   "packet_gen",
+            ("GENERATE_PACKET_REQUESTED", CaseStatus.GAP_CLEARED.value): "eligibility",
             ("PACKET_DONE",        CaseStatus.PACKET_READY.value):      "pending_approval",
             ("STAFF_APPROVED",     CaseStatus.PENDING_APPROVAL.value):  "submit",
         }
@@ -375,6 +482,10 @@ class CaseOrchestrator:
             logger.info(
                 f"[orchestrator] Passing prior gap_analysis result into eligibility for {self.case_id}"
             )
+
+        db_case.status = CaseStatus.ELIGIBILITY_RUNNING.value
+        db.add(db_case)
+        db.commit()
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -507,14 +618,7 @@ class CaseOrchestrator:
             db_case.status = CaseStatus.FAILED.value
             db.add(db_case)
             db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting to payer")
-
-        await asyncio.sleep(2)  # Simulated network latency
-
-        db_case.status = CaseStatus.TRACKING.value
-        db.add(db_case)
-        db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_COMPLETE", "SUCCESS", "Package accepted by payer. Tracking.")
+            return {"event": "FAILED", "error": str(e)}
 
         return {"event": "SUBMITTED"}
 
@@ -553,10 +657,41 @@ class CaseOrchestrator:
         )
         self.memory.save(db)
 
-        # If retry succeeded, continue the main flow
+        # If retry succeeded, continue deterministically from resulting event
         if event != "FAILED":
             db.refresh(db_case)
             next_step = self._resolve_next_step(event, db_case.status)
-            if next_step:
-                # Resume from where we left off
-                await self.run(event, payload)
+            continued = 0
+            while next_step:
+                continued += 1
+                if continued > self._max_steps:
+                    logger.error(
+                        f"[orchestrator] Safety stop during retry continuation for {self.case_id}: exceeded max steps ({self._max_steps})."
+                    )
+                    break
+
+                if self.memory.succeeded(next_step):
+                    logger.info(f"[orchestrator] Retry continuation skipping '{next_step}' — already succeeded.")
+                    prior_result = self.memory.get_last_result(next_step)
+                    prior_event = prior_result.get("event", "") if prior_result else ""
+                    db.refresh(db_case)
+                    next_step = self._resolve_next_step(prior_event, db_case.status)
+                    continue
+
+                follow_result = await self._execute_step(next_step, db, db_case, payload)
+                follow_event = follow_result.get("event", "FAILED")
+
+                self.memory.record(
+                    step=next_step,
+                    inputs={"case_id": self.case_id, "retry_chain": True},
+                    result=follow_result,
+                    status="SUCCESS" if follow_event != "FAILED" else "FAILED",
+                )
+                self.memory.save(db)
+
+                if follow_event == "FAILED":
+                    logger.error(f"[orchestrator] Retry continuation step '{next_step}' failed. Halting.")
+                    break
+
+                db.refresh(db_case)
+                next_step = self._resolve_next_step(follow_event, db_case.status)

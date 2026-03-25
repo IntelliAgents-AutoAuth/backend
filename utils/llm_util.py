@@ -3,9 +3,17 @@ import time
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
+from core.model_routing import get_model_order
 
 # Base directory for the backend
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def build_llm(model: str, api_key: str, temperature: float = 0):
+    return ChatGoogleGenerativeAI(
+        model=model,
+        temperature=temperature,
+        google_api_key=api_key,
+    )
 
 def _get_api_keys() -> List[str]:
     """Load all matching GOOGLE_API_KEY* from environment."""
@@ -44,11 +52,20 @@ class RobustLLM:
             
         # For now, we return the first key. 
         # The agents will be updated to handle rotation if this key fails.
-        return ChatGoogleGenerativeAI(
-            model=model,
-            temperature=temperature,
-            google_api_key=keys[0],
-        )
+        return build_llm(model=model, api_key=keys[0], temperature=temperature)
+
+    @staticmethod
+    def get_llm_for_task(task: str, temperature: float = 0):
+        keys = _get_api_keys()
+        if not keys:
+            print("[llm_util] ERROR: No Google API keys found in .env!")
+            return None
+        model_order = get_model_order(task)
+        if not model_order:
+            print(f"[llm_util] ERROR: No model order configured for task '{task}'.")
+            return None
+        # Returns the primary model for this task. Callers can iterate full order if needed.
+        return build_llm(model=model_order[0], api_key=keys[0], temperature=temperature)
 
 def get_keys() -> List[str]:
     return _get_api_keys()

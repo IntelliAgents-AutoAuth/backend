@@ -3,6 +3,12 @@ import os
 import sys
 import shutil
 import json
+
+# Add backend to path before local imports
+backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 from db.session import SessionLocal
 import models.user  # Fix ForeignKey error
 import models.ehr_records
@@ -10,11 +16,6 @@ from constants.cases import CaseStatus
 from schemas.cases import CaseCreate
 from crud import crud_case
 from orchestrator.case_orchestrator import CaseOrchestrator
-
-# Add backend to path
-backend_dir = os.path.dirname(os.path.abspath(__file__))
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
 
 # --- Phoenix Instrumentation ---
 try:

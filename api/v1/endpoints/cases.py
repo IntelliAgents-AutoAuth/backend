@@ -14,17 +14,33 @@ from core.security import get_current_user
 from api.deps import get_db
 from crud import crud_case, crud_ehr
 from crud.crud_extracted_data import get_extracted_data
-from services.extraction_service import fill_extracted_data_from_ehr
-from agents.gap_analysis_agent import run_gap_analysis
-from agents.eligibility_agent import run_eligibility_check
-from agents.pa_document_agent import generate_pa_content
 from orchestrator.case_orchestrator import CaseOrchestrator
-from services.pdf_generator import generate_pa_pdf
 from constants.cases import CaseStatus
 from tools.ehr_fetcher import fetch_extracted_data_by_case
 
 
 router = APIRouter(prefix="/cases", tags=["cases"])
+
+_IN_PROGRESS_STATUSES = {
+    CaseStatus.EHR_FETCHING.value,
+    CaseStatus.GAP_ANALYSIS_RUNNING.value,
+    CaseStatus.ELIGIBILITY_RUNNING.value,
+    CaseStatus.PACKET_GENERATING.value,
+}
+
+
+def _schedule_orchestrator(background_tasks: BackgroundTasks, db_case: Case, trigger: str, payload: dict | None = None) -> bool:
+    """Safely enqueue orchestrator run and avoid duplicate in-progress triggers."""
+    if trigger != "RETRY" and db_case.status in _IN_PROGRESS_STATUSES:
+        print(
+            f"[api] Skipping trigger '{trigger}' for {db_case.case_id}: "
+            f"status {db_case.status} is already in-progress."
+        )
+        return False
+
+    orchestrator = CaseOrchestrator(case_id=db_case.case_id)
+    background_tasks.add_task(orchestrator.run, trigger=trigger, payload=payload or {"pdf_path": None})
+    return True
 
 
 def merge_ehr_data_into_case(db: Session, db_case: Case):
@@ -66,25 +82,9 @@ async def create_new_case(
 ):
     """Create a new case with automatic ID and draft status."""
     db_case = crud_case.create_case(db, case_in=case_in, created_by=current_user.email)
-    
-    # 1. Trigger EHR fetch immediately (Synchronous, fast)
-    try:
-        fill_extracted_data_from_ehr(
-            db,
-            patient_id=db_case.patient_id,
-            case_id=db_case.case_id
-        )
-    except Exception as e:
-        print(f"[cases_endpoint] Failed to fetch EHR data for case {db_case.case_id}: {e}")
-        traceback.print_exc()
 
-    # 2. Trigger Orchestrator in Background (Asynchronous)
-    orchestrator = CaseOrchestrator(case_id=db_case.case_id)
-    background_tasks.add_task(
-        orchestrator.run,
-        trigger="CASE_CREATED",
-        payload={"pdf_path": None}
-    )
+    # Trigger Orchestrator in Background (single runtime owner)
+    _schedule_orchestrator(background_tasks, db_case, trigger="CASE_CREATED", payload={"pdf_path": None})
         
     return db_case
 
@@ -183,8 +183,8 @@ async def get_case_timeline(
     }
 
 
-def _check_and_clear_gaps(db_case, case_id, db, background_tasks):
-    """Shared heuristic to check if gaps are cleared and trigger eligibility."""
+def _check_and_clear_gaps(db: Session, db_case, case_id) -> bool:
+    """Check whether uploaded docs satisfy current missing requirements and mark GAP_CLEARED when true."""
     if db_case.gap_result and "missing_documents" in db_case.gap_result:
         missing_docs = db_case.gap_result["missing_documents"]
         requirement_keys = {d["document_name"].strip().lower() for d in missing_docs}
@@ -193,20 +193,26 @@ def _check_and_clear_gaps(db_case, case_id, db, background_tasks):
         print(f"[api] Checking gaps for {case_id}: req={requirement_keys}, uploaded={uploaded_keys}")
         
         if requirement_keys and requirement_keys.issubset(uploaded_keys):
-            print(f"[api] SUCCESS: All gaps cleared for {case_id}. Auto-triggering Eligibility.")
-            db_case.status = "GAP_CLEARED"
-            
-            gap_res = dict(db_case.gap_result)
-            gap_res["status"] = "GAP_CLEARED"
-            gap_res["missing_documents"] = []
-            db_case.gap_result = gap_res
-            
+            print(f"[api] Uploads satisfy all current missing docs for {case_id}. Marking GAP_CLEARED.")
+
+            db_case.status = CaseStatus.GAP_CLEARED.value
+            if isinstance(db_case.gap_result, dict):
+                gap_result = dict(db_case.gap_result)
+                gap_result["status"] = CaseStatus.GAP_CLEARED.value
+                gap_result["missing_documents"] = []
+                db_case.gap_result = gap_result
+                flag_modified(db_case, "gap_result")
+
+            db.add(db_case)
             db.commit()
-            
-            # Note: Eligibility is now triggered via CaseOrchestrator in the calling endpoint
+            db.refresh(db_case)
+            return True
         else:
             diff = requirement_keys - uploaded_keys
             print(f"[api] Gaps still exist for {case_id}. Missing: {diff}")
+            return False
+
+    return False
 
 @router.post("/{case_id}/upload-file")
 async def upload_case_file(
@@ -258,13 +264,22 @@ async def upload_case_file(
     db.commit()
     db.refresh(db_case)
     
-    # 4. Check if all gaps cleared and trigger orchestrator
-    _check_and_clear_gaps(db_case, case_id, db, background_tasks)
-    
-    # If gaps are now cleared, the orchestrator handles the next steps
-    if db_case.status == CaseStatus.GAP_CLEARED.value:
-        orchestrator = CaseOrchestrator(case_id=case_id)
-        background_tasks.add_task(orchestrator.run, trigger="DOCUMENTS_UPLOADED")
+    # 4. Log diagnostic gap summary
+    _check_and_clear_gaps(db, db_case, case_id)
+
+    # 5. Trigger orchestrator only when upload can impact the current stage.
+    triggerable_statuses = {
+        CaseStatus.GAP_FOUND.value,
+        CaseStatus.GAP_CLEARED.value,
+        CaseStatus.GAP_ANALYSIS_FAILED.value,
+    }
+    if db_case.status in triggerable_statuses:
+        _schedule_orchestrator(background_tasks, db_case, trigger="DOCUMENTS_UPLOADED", payload={"pdf_path": None})
+    else:
+        print(
+            f"[api] Skipping DOCUMENTS_UPLOADED trigger for {case_id}. "
+            f"Current status={db_case.status} is not triggerable."
+        )
     
     return {"status": "SUCCESS", "file_path": file_path}
 
@@ -308,62 +323,48 @@ async def bulk_upload_case_documents(
     db.commit()
     db.refresh(db_case)
     
-    _check_and_clear_gaps(db_case, case_id, db, background_tasks)
-    
-    # If gaps are now cleared, the orchestrator handles the next steps
-    if db_case.status == CaseStatus.GAP_CLEARED.value:
-        orchestrator = CaseOrchestrator(case_id=case_id)
-        background_tasks.add_task(orchestrator.run, trigger="DOCUMENTS_UPLOADED")
+    _check_and_clear_gaps(db, db_case, case_id)
+
+    triggerable_statuses = {
+        CaseStatus.GAP_FOUND.value,
+        CaseStatus.GAP_CLEARED.value,
+        CaseStatus.GAP_ANALYSIS_FAILED.value,
+    }
+    if db_case.status in triggerable_statuses:
+        _schedule_orchestrator(background_tasks, db_case, trigger="DOCUMENTS_UPLOADED", payload={"pdf_path": None})
+    else:
+        print(
+            f"[api] Skipping DOCUMENTS_UPLOADED trigger for {case_id}. "
+            f"Current status={db_case.status} is not triggerable."
+        )
         
     return {"status": "SUCCESS"}
 
 
-@router.post("/{case_id}/sync", response_model=CaseSchema)
+@router.post("/{case_id}/sync")
 async def sync_case_ehr(
     case_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Manually trigger EHR data fetch and Gap Analysis for a specific case."""
+    """Manually trigger orchestrator sync flow for a specific case."""
     db_case = crud_case.get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Case with ID {case_id} not found"
         )
-    
-    try:
-        fill_extracted_data_from_ehr(
-            db,
-            patient_id=db_case.patient_id,
-            case_id=db_case.case_id
-        )
-        # Also trigger Gap Analysis during sync
-        print(f"[api] Manually Triggering Sync: {case_id}")
-        await run_gap_analysis({
-            "case_id": case_id,
-            "patient_name": f"Patient {db_case.patient_id}",
-            "pdf_path": None
-        })
-        
-        # Refresh case record to get updated gap fields
-        db.refresh(db_case)
-        
-    except Exception as e:
-        print(f"[cases_endpoint] Sync failed for {case_id}: {e}")
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch EHR data: {type(e).__name__}: {e}"
-        )
-        
-    return merge_ehr_data_into_case(db, db_case)
+
+    _schedule_orchestrator(background_tasks, db_case, trigger="SYNC_REQUESTED", payload={"pdf_path": None})
+    return {"status": "SUCCESS", "message": "Sync requested. Orchestrator running in background."}
   
 
 
 @router.post("/{case_id}/eligibility")
 async def check_case_eligibility(
     case_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -389,15 +390,16 @@ async def check_case_eligibility(
 
     try:
         print(f"[cases_endpoint] Triggering eligibility via orchestrator for: {case_id}...")
-        orchestrator = CaseOrchestrator(case_id=case_id)
-        # We use DOCUMENTS_UPLOADED as the trigger because that's the logic 
-        # that flows into eligibility in the current orchestrator.
-        background_tasks.add_task(orchestrator.run, trigger="DOCUMENTS_UPLOADED")
+        _schedule_orchestrator(background_tasks, db_case, trigger="ELIGIBILITY_REQUESTED", payload={"pdf_path": None})
         
         return {"status": "SUCCESS", "message": "Eligibility check triggered in background."}
     except Exception as e:
         print(f"[cases_endpoint] Orchestration trigger failed for {case_id}: {e}")
         traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to trigger eligibility orchestration: {type(e).__name__}: {e}",
+        )
 @router.get("/{case_id}/preview")
 async def preview_pa_package(
     case_id: str,
@@ -455,8 +457,7 @@ async def submit_case_to_payer(
             detail=f"Case status must be PACKET_READY or PENDING_APPROVAL. Current: {db_case.status}"
         )
         
-    orchestrator = CaseOrchestrator(case_id=case_id)
-    background_tasks.add_task(orchestrator.run, trigger="STAFF_APPROVED")
+    _schedule_orchestrator(background_tasks, db_case, trigger="STAFF_APPROVED", payload={"pdf_path": None})
     
     return {"status": "SUCCESS", "message": "Case submission initiated."}
 
@@ -464,10 +465,11 @@ async def submit_case_to_payer(
 @router.post("/{case_id}/generate-document")
 async def generate_pa_document(
     case_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate a complete Prior Authorization PDF package for a case.
+    """Trigger background PA package generation via orchestrator.
 
     Sections:
       1. Cover Letter       — LLM-written medical necessity letter
@@ -475,7 +477,7 @@ async def generate_pa_document(
       3. Checklist          — every insurance requirement, ticked with evidence
       4. Attached Documents — all uploaded files merged in
 
-    Returns the PDF as a file download.
+    Use /preview to fetch the latest generated package when ready.
     """
     db_case = crud_case.get_case(db, case_id=case_id)
     if not db_case:
@@ -484,41 +486,21 @@ async def generate_pa_document(
             detail=f"Case with ID {case_id} not found",
         )
 
-    # Resolve uploaded file paths stored on the case
-    uploaded_paths = []
-    if db_case.uploaded_files:
-        import os
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))
-        )))
-        for f in db_case.uploaded_files:
-            path = f.get("path") or f.get("file_path") or ""
-            if path and os.path.exists(path):
-                uploaded_paths.append(path)
+    _schedule_orchestrator(background_tasks, db_case, trigger="GENERATE_PACKET_REQUESTED", payload={"pdf_path": None})
+    return {"status": "SUCCESS", "message": "Document generation requested. Check /preview once ready."}
 
-    try:
-        print(f"[cases_endpoint] Generating PA document for case: {case_id}...")
 
-        # 1. LLM generates content
-        content = generate_pa_content(case_id=case_id, pdf_path=None)
+@router.post("/{case_id}/retry")
+async def retry_case_flow(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retry last failed orchestrator step for a case."""
+    db_case = crud_case.get_case(db, case_id=case_id)
+    if not db_case:
+        raise HTTPException(status_code=404, detail="Case not found")
 
-        # 2. PDF builder assembles the package
-        pdf_path = generate_pa_pdf(
-            case_id=case_id,
-            content=content,
-            uploaded_file_paths=uploaded_paths,
-        )
-
-        print(f"[cases_endpoint] PA document ready: {pdf_path}")
-        return FileResponse(
-            path=pdf_path,
-            media_type="application/pdf",
-            filename=f"PA_Package_{case_id}.pdf",
-        )
-    except Exception as e:
-        print(f"[cases_endpoint] Document generation failed for {case_id}: {e}")
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Document generation failed: {type(e).__name__}: {e}",
-        )
+    _schedule_orchestrator(background_tasks, db_case, trigger="RETRY", payload={"pdf_path": None})
+    return {"status": "SUCCESS", "message": "Retry requested in background."}

@@ -17,6 +17,7 @@ def migrate():
 
     # List of columns to add with their types
     columns_to_add = [
+        ("patient_name", "VARCHAR(150)"),
         ("total_required", "INTEGER"),
         ("total_matched", "INTEGER"),
         ("total_missing", "INTEGER"),

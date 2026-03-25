@@ -14,7 +14,7 @@ import json
 import re
 from datetime import datetime
 from utils.agent_logger import log_event
-from utils.llm_util import get_keys
+from utils.llm_util import get_keys, get_model_order
 import time
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,11 +42,13 @@ from tools.pdf_extractor import extract_raw_text
 
 _llm = None
 
-def _get_llm(api_key=None):
+def _get_llm(api_key=None, model_name: str | None = None):
     if not api_key:
         api_key = os.getenv("GOOGLE_API_KEY")
+    if not model_name:
+        model_name = get_model_order("pa_document")[0]
     return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model=model_name,
         temperature=0.3,
         google_api_key=api_key,
     )
@@ -66,20 +68,22 @@ def _ehr_to_text(ehr: dict) -> str:
 def _invoke(prompt_template, variables: dict) -> str:
     """Format a prompt template and call the LLM with key rotation."""
     all_keys = get_keys()
+    model_order = get_model_order("pa_document")
     messages = prompt_template.format_messages(**variables)
-    
+
     for key_index, current_key in enumerate(all_keys):
-        try:
-            llm = _get_llm(api_key=current_key)
-            response = llm.invoke(messages)
-            return response.content.strip()
-        except Exception as e:
-            error_text = str(e)
-            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-                print(f"[pa_document_agent] Key {key_index + 1} exhausted. Switching next...")
+        for model_name in model_order:
+            try:
+                llm = _get_llm(api_key=current_key, model_name=model_name)
+                response = llm.invoke(messages)
+                return response.content.strip()
+            except Exception as e:
+                error_text = str(e)
+                if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+                    print(f"[pa_document_agent] model={model_name} exhausted on key {key_index + 1}. Trying next model on same key...")
+                    continue
+                print(f"[pa_document_agent] model={model_name} key {key_index + 1} failed: {error_text}")
                 continue
-            else:
-                raise e
     raise Exception("All API keys exhausted or fatal error.")
 
 

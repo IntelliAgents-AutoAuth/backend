@@ -20,7 +20,8 @@ if backend_dir not in sys.path:
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from utils.agent_logger import log_event
-from utils.llm_util import get_keys
+from utils.llm_util import get_keys, get_model_order
+from constants.cases import CaseStatus
 import time
 
 from prompts.eligibility_prompts import get_eligibility_prompt
@@ -32,13 +33,15 @@ from prompts.eligibility_prompts import get_eligibility_prompt
 _eligibility_chain = None
 
 
-def get_eligibility_chain(api_key=None):
+def get_eligibility_chain(api_key=None, model_name: str | None = None):
     """Creates an eligibility chain using the provided API key (or default from env)."""
     if not api_key:
         api_key = os.getenv("GOOGLE_API_KEY")
+    if not model_name:
+        model_name = get_model_order("eligibility")[0]
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model=model_name,
         temperature=0,
         google_api_key=api_key,
     )
@@ -265,31 +268,26 @@ INSTRUCTIONS:
     }
 
     response = None
-    success = False
-    
+    model_order = get_model_order("eligibility")
     for key_index, current_key in enumerate(all_keys):
-        if success: break
-        
-        print(f"[eligibility_agent] Attempting LLM request with Key {key_index + 1}/{len(all_keys)}")
-        
-        try:
-            current_chain = get_eligibility_chain(api_key=current_key)
-            response = current_chain.invoke(prompt_input)
-            
-            print(f"[eligibility_agent] LLM verdict received (Key {key_index + 1})")
-            success = True
-            break
-        except Exception as e:
-            error_text = str(e)
-            print(f"[eligibility_agent] Key {key_index + 1} failed: {error_text}")
-            
-            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-                print(f"[eligibility_agent] Key {key_index + 1} exhausted. Switching next...")
-                continue
-            else:
-                print(f"[eligibility_agent] Fatal LLM error: {error_text}")
-                success = False
+        print(f"[eligibility_agent] Trying key {key_index + 1}/{len(all_keys)}")
+        for model_name in model_order:
+            print(f"[eligibility_agent] Attempting LLM request with key={key_index + 1}/{len(all_keys)}, model={model_name}")
+            try:
+                current_chain = get_eligibility_chain(api_key=current_key, model_name=model_name)
+                response = current_chain.invoke(prompt_input)
+                print(f"[eligibility_agent] LLM verdict received (model={model_name}, key={key_index + 1})")
                 break
+            except Exception as e:
+                error_text = str(e)
+                print(f"[eligibility_agent] model={model_name}, key={key_index + 1} failed: {error_text}")
+                if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+                    print(f"[eligibility_agent] model={model_name} exhausted on key {key_index + 1}. Trying next model on same key...")
+                    continue
+                # Non-quota errors still try next model on the same key first.
+                continue
+        if response is not None:
+            break
                     
     if not response:
         # Fallback if everything failed
@@ -323,9 +321,9 @@ INSTRUCTIONS:
             db_case.eligibility_verdict = parsed.get("verdict")
             # If eligible, we can move the status forward
             if parsed.get("eligible"):
-                db_case.status = "APPROVED"
+                db_case.status = CaseStatus.APPROVED.value
             else:
-                db_case.status = "DENIED"
+                db_case.status = CaseStatus.DENIED.value
             
             db.add(db_case)
             db.commit()

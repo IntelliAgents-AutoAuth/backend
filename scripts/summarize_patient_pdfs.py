@@ -66,7 +66,7 @@ async def main():
 
     print(f"Found {len(pdf_files)} PDFs. Start concurrent summarization...")
     
-    llm = RobustLLM.get_llm(model="gemini-2.5-flash")
+    llm = RobustLLM.get_llm_for_task(task="summarization")
     if not llm:
         print("Failed to initialize LLM.")
         return
