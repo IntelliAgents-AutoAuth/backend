@@ -17,17 +17,19 @@ Architecture
     → memory.save()
 
 Agents never call each other and never decide what comes next.
-The orchestrator owns all routing logic via TRANSITIONS.
+The orchestrator owns all routing logic via an LLM Supervisor.
 """
 
 import os
+import json
 import asyncio
 import traceback
 import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-import db.base  # noqa: F401 — registers all models with SQLAlchemy metadata (fixes FK resolution)
+import db.base  # noqa: F401
 from db.session import SessionLocal
 from constants.cases import CaseStatus
 from crud import crud_case
@@ -38,23 +40,39 @@ from agents.pa_document_agent import generate_pa_content
 from services.pdf_generator import generate_pa_pdf
 from utils.agent_logger import log_event
 from orchestrator.memory import OrchestratorMemory
+from orchestrator.orchestrator_prompts import ORCHESTRATOR_SYSTEM_PROMPT, CONTEXT_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────
-# STATE MACHINE  —  (event, current_db_status) → next_step
-# None status means "any status is fine" (wildcard)
+# STEP REGISTRY — Metadata for the LLM Supervisor
 # ─────────────────────────────────────────────────────────────
-TRANSITIONS: dict[tuple[str, str | None], str] = {
-    # Trigger              DB Status (after agent writes it)     Next step
-    ("CASE_CREATED",       None):                               "ehr_fetch",
-    ("EHR_FETCH_DONE",     CaseStatus.EHR_FETCHED.value):      "gap_analysis",
-    ("GAP_CLEARED",        CaseStatus.GAP_CLEARED.value):      "eligibility",
-    ("DOCUMENTS_UPLOADED", CaseStatus.GAP_CLEARED.value):      "eligibility",
-    ("ELIGIBLE",           "APPROVED"):                         "packet_gen",
-    ("PACKET_DONE",        CaseStatus.PACKET_READY.value):      "pending_approval",
-    ("STAFF_APPROVED",     CaseStatus.PENDING_APPROVAL.value):  "submit",
+STEP_REGISTRY = {
+    "ehr_fetch": {
+        "description": "Fetch and extract medical data from the EHR system for a specific patient.",
+        "expected_event": "EHR_FETCH_DONE",
+    },
+    "gap_analysis": {
+        "description": "An AI agent checks for missing clinical data needed for the PA based on payer policies.",
+        "expected_event": "GAP_CLEARED or GAP_FOUND",
+    },
+    "eligibility": {
+        "description": "An AI agent verifies if the patient qualifies for the procedure using the extracted medical evidence.",
+        "expected_event": "ELIGIBLE or NOT_ELIGIBLE",
+    },
+    "packet_gen": {
+        "description": "Generate the final PA document package (PDF) with all clinical justifications attached.",
+        "expected_event": "PACKET_DONE",
+    },
+    "pending_approval": {
+        "description": "Prepare the case for human (staff) review. The flow pauses here.",
+        "expected_event": "AWAITING_STAFF",
+    },
+    "submit": {
+        "description": "Submit the final PA package to the insurance payer.",
+        "expected_event": "SUBMITTED",
+    },
 }
 
 
@@ -108,35 +126,40 @@ class CaseOrchestrator:
                 await self._handle_retry(db, db_case, payload)
                 return
 
-            # Resolve the first step from the trigger
-            current_step = self._resolve_next_step(trigger, db_case.status)
+            # AI Thinking & Step resolution
+            # Initial decision based on the trigger
+            decision = await self._resolve_next_step_llm(db, db_case, trigger, payload)
+            current_step = decision.get("next_step")
+            thinking = decision.get("thinking", "No explanation provided.")
 
-            # State machine loop — orchestrator drives every transition
+            # State machine loop
             while current_step:
                 # Skip steps the orchestrator already successfully completed
                 if self.memory.succeeded(current_step):
-                    logger.info(
-                        f"[orchestrator] Skipping '{current_step}' — already ran successfully."
-                    )
-                    # Still need to figure out the next step after the skipped one
+                    logger.info(f"[orchestrator] Skipping '{current_step}' — already ran successfully.")
                     prior_result = self.memory.get_last_result(current_step)
                     event = prior_result.get("event", "") if prior_result else ""
                     db.refresh(db_case)
-                    current_step = self._resolve_next_step(event, db_case.status)
+                    
+                    decision = await self._resolve_next_step_llm(db, db_case, event, payload)
+                    current_step = decision.get("next_step")
+                    thinking = decision.get("thinking", "Skipped step, next step decided.")
                     continue
 
-                logger.info(f"[orchestrator] Executing step: '{current_step}'")
-                log_event(self.case_id, "ORCHESTRATOR", f"STEP_START_{current_step.upper()}", "RUNNING", f"Starting step: {current_step}")
+                logger.info(f"[orchestrator] Executing step: '{current_step}' | Thinking: {thinking}")
+                log_event(self.case_id, "ORCHESTRATOR", f"STEP_START_{current_step.upper()}", "RUNNING", f"LLM Decision: {thinking}")
 
                 result = await self._execute_step(current_step, db, db_case, payload)
-
-                # result must always contain an "event" key so the transition table works
                 event = result.get("event", "FAILED")
 
-                # Record what we sent to the agent and what came back
+                # Record decision and execution
                 self.memory.record(
                     step=current_step,
-                    inputs={"case_id": self.case_id, "payload_keys": list(payload.keys())},
+                    inputs={
+                        "case_id": self.case_id, 
+                        "payload_keys": list(payload.keys()),
+                        "llm_thinking": thinking
+                    },
                     result=result,
                     status="SUCCESS" if event != "FAILED" else "FAILED",
                 )
@@ -146,9 +169,8 @@ class CaseOrchestrator:
                     logger.error(f"[orchestrator] Step '{current_step}' failed. Halting.")
                     break
 
-                # Refresh DB state (agents update status internally)
+                # Refresh DB state
                 db.refresh(db_case)
-                log_event(self.case_id, "ORCHESTRATOR", f"STEP_DONE_{current_step.upper()}", "SUCCESS", f"Completed step: {current_step} → event: {event}")
 
                 current_step = self._resolve_next_step(event, db_case.status)
 
@@ -172,18 +194,91 @@ class CaseOrchestrator:
             db.close()
 
     # ─────────────────────────────────────────
-    # TRANSITION TABLE RESOLVER
+    # LLM SUPERVISOR RESOLVER
     # ─────────────────────────────────────────
+
+    async def _resolve_next_step_llm(
+        self, db: Session, db_case, last_event: str, payload: dict
+    ) -> dict:
+        """
+        Calls the Supervisor LLM to decide the next step.
+        Returns {"thinking": str, "next_step": str | None}
+        """
+        try:
+            # Initialize LLM (Gemini)
+            llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp")
+
+            # Prepare Step Registry Description
+            step_registry_desc = "\n".join(
+                [f"- {name}: {info['description']}" for name, info in STEP_REGISTRY.items()]
+            )
+
+            # System Prompt
+            system_msg = ORCHESTRATOR_SYSTEM_PROMPT.format(
+                step_registry_desc=step_registry_desc
+            )
+
+            # Context
+            patient_info = f"Patient ID {db_case.patient_id}"
+            history_summary = self.memory.summary()
+
+            context_msg = CONTEXT_TEMPLATE.format(
+                case_id=self.case_id,
+                patient_info=patient_info,
+                db_status=db_case.status,
+                last_event=last_event,
+                history_summary=history_summary,
+            )
+
+            logger.info(f"[orchestrator] Calling Supervisor LLM for decision on {self.case_id}...")
+            response = await llm.ainvoke([
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": context_msg}
+            ])
+
+            # Parse JSON response
+            content = response.content.strip()
+            # Handle potential markdown code blocks
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            
+            decision = json.loads(content)
+            
+            # Validation: next_step must be in registry or None
+            step = decision.get("next_step")
+            if step and step not in STEP_REGISTRY:
+                logger.warning(f"[orchestrator] LLM suggested unknown step: {step}. Falling back to None.")
+                decision["next_step"] = None
+                
+            return decision
+
+        except Exception as e:
+            logger.error(f"[orchestrator] Supervisor LLM error: {e}")
+            # Fallback to old deterministic transition if LLM fails
+            fallback_step = self._resolve_next_step(last_event, db_case.status)
+            return {
+                "thinking": f"LLM error occurred: {e}. Falling back to deterministic map.",
+                "next_step": fallback_step
+            }
 
     def _resolve_next_step(self, event: str, db_status: str) -> str | None:
         """
-        Look up the next step from the transition table.
-        First tries exact (event, status) match, then (event, None) wildcard.
-        Returns None if no transition exists (i.e. stop).
+        Old deterministic transition table lookup (now used as a fallback).
         """
-        next_step = TRANSITIONS.get((event, db_status))
+        # Hardcoded fallback logic since we removed the global TRANSITIONS constant
+        FALLBACK_MAP = {
+            ("CASE_CREATED",       None):                               "ehr_fetch",
+            ("EHR_FETCH_DONE",     CaseStatus.EHR_FETCHED.value):      "gap_analysis",
+            ("GAP_CLEARED",        CaseStatus.GAP_CLEARED.value):      "eligibility",
+            ("DOCUMENTS_UPLOADED", CaseStatus.GAP_CLEARED.value):      "eligibility",
+            ("ELIGIBLE",           "APPROVED"):                         "packet_gen",
+            ("PACKET_DONE",        CaseStatus.PACKET_READY.value):      "pending_approval",
+            ("STAFF_APPROVED",     CaseStatus.PENDING_APPROVAL.value):  "submit",
+        }
+        
+        next_step = FALLBACK_MAP.get((event, db_status))
         if next_step is None:
-            next_step = TRANSITIONS.get((event, None))
+            next_step = FALLBACK_MAP.get((event, None))
         return next_step
 
     # ─────────────────────────────────────────
