@@ -20,9 +20,12 @@ You will receive:
 5. If all clinical and administrative requirements are satisfied by either the original EHR or the NEWLY_UPLOADED_EVIDENCE, the verdict must be ELIGIBLE.
 6. If a critical piece of evidence is still missing OR if the evidence contradicts the policy (e.g., patient age > 65 and policy is only for < 65), the verdict must be NOT_ELIGIBLE.
 
-Return your final answer in this STRICT format (no deviations, no extra text):
-VERDICT: [ELIGIBLE or NOT_ELIGIBLE]
-REASON: [A detailed, step-by-step reasoning citing specific policy requirements and the corresponding EHR/uploaded evidence. If NOT_ELIGIBLE, clearly state which specific document or clinical value is missing or failing, and why the provided uploads were insufficient.]
+Return your final answer in this STRICT sequence (do not deviate):
+REASONING:
+[A detailed, step-by-step reasoning citing specific policy requirements and the corresponding EHR/uploaded evidence. If NOT_ELIGIBLE, clearly state which specific document or clinical value is missing or failing, and why the provided uploads were insufficient. Do your thinking here.]
+
+VERDICT:
+[ELIGIBLE or NOT_ELIGIBLE]
 """
 
 

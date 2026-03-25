@@ -53,14 +53,14 @@ def get_eligibility_chain(api_key=None):
 
 def _parse_verdict(raw_output: str) -> dict:
     """
-    Parse the strict VERDICT / REASON output format from the LLM.
+    Parse the strict REASONING / VERDICT output format from the LLM.
     Falls back gracefully if the format is not exactly followed.
     """
     verdict = "NOT_ELIGIBLE"   # safe default
     reason = raw_output.strip()
 
     verdict_match = re.search(r"VERDICT\s*:\s*(ELIGIBLE|NOT_ELIGIBLE)", raw_output, re.IGNORECASE)
-    reason_match  = re.search(r"REASON\s*:\s*(.+)", raw_output, re.IGNORECASE | re.DOTALL)
+    reason_match  = re.search(r"(?:REASONING|REASON)\s*:\s*(.*?)(?=\s*VERDICT\s*:|$)", raw_output, re.IGNORECASE | re.DOTALL)
 
     if verdict_match:
         verdict = verdict_match.group(1).upper()
