@@ -176,7 +176,21 @@ def run_eligibility_check(props: dict) -> dict:
             status     = "RUNNING"
         )
         raw_ehr = fetch_extracted_data_by_case(case_id)
-        ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
+        if raw_ehr:
+            ehr_data = json.dumps(raw_ehr, indent=2, default=str)
+            
+            # --- RAG POLICY ENHANCEMENT ---
+            diagnosis = raw_ehr.get("primary_diagnosis") or raw_ehr.get("diagnosis")
+            if diagnosis:
+                try:
+                    from tools.policy_retriever import search_policy_criteria
+                    rag_criteria = search_policy_criteria(f"Rules and requirements for {diagnosis}", k=4)
+                    eligibility_criteria_list += f"\n\n[RAG SEARCH RESULTS FOR {diagnosis.upper()}]:\n{rag_criteria}"
+                    print(f"[eligibility_agent] Augmented criteria with RAG search for {diagnosis}")
+                except Exception as e:
+                    print(f"[eligibility_agent] RAG fetch failed (is ChromaDB built?): {e}")
+        else:
+            ehr_data = "No specific patient data found."
 
         # ── 1.1 FORMAT UPLOADED EVIDENCE ─────────
         uploaded_evidence = ""

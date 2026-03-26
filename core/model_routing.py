@@ -6,7 +6,7 @@ from typing import List
 TASK_MODEL_FALLBACKS: dict[str, list[str]] = {
     "orchestrator_supervisor": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
     "eligibility": ["gemini-2.5-pro", "gemini-2.5-flash"],
-    "gap_analysis": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
+    "gap_analysis": ["gemini-2.5-flash"],
     "summarization": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
     "pa_document": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
     "policy_extraction": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
