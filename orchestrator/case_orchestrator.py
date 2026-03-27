@@ -450,25 +450,61 @@ class CaseOrchestrator:
 
     async def _step_gap_analysis(self, db: Session, db_case, payload: dict) -> dict:
         """Step 2 — Run gap analysis LLM agent."""
+        db_case.status = CaseStatus.GAP_ANALYSIS_RUNNING.value
+        db.add(db_case)
+        db.commit()
+
         agent_props = {
             "case_id": self.case_id,
             "patient_name": f"Patient {db_case.patient_id}",
             "pdf_path": payload.get("pdf_path"),
         }
         result = await run_gap_analysis(agent_props)
+        parsed = result.get("output") or {}
 
-        db.refresh(db_case)
-        new_status = db_case.status
+        # ── PERSISTENCE (Moved from agent to Orchestrator) ──
+        summary = parsed.get("summary", {})
+        db_case.gap_result = parsed
 
-        # Determine the outgoing event from DB status (agent wrote it)
-        if new_status == CaseStatus.GAP_CLEARED.value:
-            event = "GAP_CLEARED"
-        elif new_status == CaseStatus.GAP_FOUND.value:
-            event = "GAP_FOUND"   # → waiting for docs, no next step yet
-        else:
+        # Determine next status based on LLM output
+        new_status = parsed.get("status")
+        if new_status == "INCOMPLETE":
+            db_case.status = CaseStatus.GAP_ANALYSIS_FAILED.value
             event = "FAILED"
+        elif new_status == CaseStatus.GAP_FOUND.value:
+            db_case.status = CaseStatus.GAP_FOUND.value
+            event = "GAP_FOUND"
+        elif new_status == CaseStatus.GAP_CLEARED.value:
+            db_case.status = CaseStatus.GAP_CLEARED.value
+            event = "GAP_CLEARED"
+        else:
+            # Fallback: if no missing docs, it's cleared
+            missing_docs = parsed.get("missing_documents")
+            if isinstance(missing_docs, list) and len(missing_docs) == 0:
+                db_case.status = CaseStatus.GAP_CLEARED.value
+                event = "GAP_CLEARED"
+            else:
+                db_case.status = CaseStatus.GAP_FOUND.value
+                event = "GAP_FOUND"
 
-        return {"event": event, "gap_result": result.get("output")}
+        db_case.total_required = summary.get("total_required")
+        db_case.total_matched  = summary.get("total_matched")
+        db_case.total_missing  = summary.get("total_missing")
+        db_case.gap_percentage = summary.get("gap_percentage")
+
+        db.add(db_case)
+        db.commit()
+        db.refresh(db_case)
+
+        log_event(
+            case_id=self.case_id, 
+            agent_name="GAP_ANALYSIS_AGENT", 
+            event="GAP_ANALYSIS_COMPLETED", 
+            status=event, 
+            message=f"Missing {db_case.total_missing} of {db_case.total_required} documents"
+        )
+
+        return {"event": event, "gap_result": parsed}
 
     async def _step_eligibility(self, db: Session, db_case, payload: dict) -> dict:
         """Step 3 — Run eligibility check.
@@ -499,12 +535,28 @@ class CaseOrchestrator:
             },
         )
 
-        db.refresh(db_case)
-
+        # ── PERSISTENCE (Moved from agent to Orchestrator) ──
+        db_case.eligibility_result = result
+        db_case.eligibility_verdict = result.get("verdict")
+        
         if result.get("eligible"):
+            db_case.status = CaseStatus.APPROVED.value
             event = "ELIGIBLE"
         else:
+            db_case.status = CaseStatus.DENIED.value
             event = "NOT_ELIGIBLE"
+
+        db.add(db_case)
+        db.commit()
+        db.refresh(db_case)
+
+        log_event(
+            case_id=self.case_id,
+            agent_name="ELIGIBILITY_AGENT",
+            event="ELIGIBILITY_CHECK_COMPLETED",
+            status=event,
+            message=result.get("reason", "")[:200]
+        )
 
         return {"event": event, "eligibility_result": result}
 

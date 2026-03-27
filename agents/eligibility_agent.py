@@ -325,40 +325,7 @@ INSTRUCTIONS:
     parsed     = _parse_verdict(raw_output)
 
     # ── PERSISTENCE ──────────────────────────
-    from db.session import SessionLocal
-    from crud import crud_case
-    db = SessionLocal()
-    try:
-        db_case = crud_case.get_case(db, case_id=case_id)
-        if db_case:
-            db_case.eligibility_result = parsed
-            db_case.eligibility_verdict = parsed.get("verdict")
-            # If eligible, we can move the status forward
-            if parsed.get("eligible"):
-                db_case.status = CaseStatus.APPROVED.value
-            else:
-                db_case.status = CaseStatus.DENIED.value
-            
-            db.add(db_case)
-            db.commit()
-            db.refresh(db_case)
-            
-            total_duration = int((time.time() - agent_start) * 1000)
-            log_event(
-                case_id     = case_id,
-                agent_name  = "ELIGIBILITY_AGENT",
-                event       = "ELIGIBILITY_CHECK_COMPLETED",
-                status      = parsed.get("verdict"),
-                message     = parsed.get("reason")[:200] + "..." if len(parsed.get("reason", "")) > 200 else parsed.get("reason"),
-                metadata    = parsed,
-                duration_ms = total_duration
-            )
-            print(f"[eligibility_agent] Persisted results for {case_id}")
-    except Exception as e:
-        print(f"[eligibility_agent] Persistence failed for {case_id}: {e}")
-        db.rollback()
-    finally:
-        db.close()
+    print(f"[eligibility_agent] About to return result for case_id={case_id}")
 
     return {
         "case_id": case_id,

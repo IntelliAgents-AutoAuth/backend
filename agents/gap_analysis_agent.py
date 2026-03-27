@@ -88,36 +88,6 @@ async def run_gap_analysis(props: dict) -> dict:
     patient_name = props.get("patient_name", "Unknown")
 
     from crud import crud_case
-    db = SessionLocal()
-
-    # Prevent duplicate parallel gap analysis if NOT already set by a trusted caller (like Orchestrator)
-    # If already running, short-circuit to avoid duplicate concurrent executions.
-    db_case = crud_case.get_case(db, case_id=case_id)
-    if db_case and db_case.status == CaseStatus.GAP_ANALYSIS_RUNNING.value:
-        db.close()
-        print(f"[gap_analysis_agent] Skipping duplicate run for {case_id}: analysis already running.")
-        return {
-            "case_id": case_id,
-            "output": {
-                "status": "RUNNING",
-                "message": "Gap analysis already in progress"
-            }
-        }
-
-    # Mark as running
-    if db_case:
-        db_case.status = CaseStatus.GAP_ANALYSIS_RUNNING.value
-        db.add(db_case)
-        db.commit()
-
-    db.close()
-
-    # ── Default PDF for demo/testing ─────────
-    if not pdf_path or not os.path.exists(pdf_path):
-        pdf_path = os.path.join(
-            backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
-        )
-
     print(f"\n[gap_analysis_agent] Gap analysis triggered for case_id={case_id}, patient={patient_name}")
     print(f"[gap_analysis_agent] --- Started for {case_id} ---")
 
@@ -332,84 +302,8 @@ INSTRUCTIONS:
     else:
         print("[gap_analysis_agent] WARNING: Unable to parse LLM output into dict summary.")
 
-    print(f"[gap_analysis_agent] About to send result back to frontend for case_id={case_id}")
+    print(f"[gap_analysis_agent] About to return result for case_id={case_id}")
 
-    # ── PERSISTENCE ──────────────────────────
-    # Create a fresh DB session for the background task
-    db = SessionLocal()
-    try:
-        db_case = crud_case.get_case(db, case_id=case_id)
-        if db_case:
-            summary = parsed.get("summary", {})
-            db_case.gap_result = parsed
-
-            # Keep status from LLM if valid, else once complete set to GAP_CLEARED or GAP_ANALYSIS_FAILED
-            new_status = parsed.get("status")
-            if new_status == "INCOMPLETE":
-                db_case.status = CaseStatus.GAP_ANALYSIS_FAILED.value
-            elif new_status:
-                db_case.status = new_status
-            else:
-                # If the LLM returns a complete result but no explicit status,
-                # mark as GAP_CLEARED when no missing documents are found.
-                missing_docs = parsed.get("missing_documents")
-                if isinstance(missing_docs, list) and len(missing_docs) == 0:
-                    db_case.status = CaseStatus.GAP_CLEARED.value
-
-
-            db_case.total_required = summary.get("total_required")
-            db_case.total_matched  = summary.get("total_matched")
-            db_case.total_missing  = summary.get("total_missing")
-            db_case.gap_percentage = summary.get("gap_percentage")
-
-            db.add(db_case)
-            db.commit()
-            db.refresh(db_case)
-
-            # ── LOG 5: Final Result ──────────────────
-            total_duration = int((time.time() - agent_start) * 1000)
-            gap_status = parsed.get("status", "UNKNOWN")
-            summary    = parsed.get("summary", {})
-
-            log_event(
-                case_id     = case_id,
-                agent_name  = "GAP_ANALYSIS_AGENT",
-                event       = "GAP_ANALYSIS_COMPLETED",
-                status      = gap_status,
-                message     = f"Missing {summary.get('total_missing', 0)} of {summary.get('total_required', 0)} documents",
-                metadata    = {
-                    "total_required": summary.get("total_required"),
-                    "total_matched":  summary.get("total_matched"),
-                    "total_missing":  summary.get("total_missing"),
-                    "gap_percentage": summary.get("gap_percentage"),
-                    "next_action":    parsed.get("next_action")
-                },
-                duration_ms = total_duration
-            )
-            print(f"[gap_analysis_agent] Persisted results for {case_id}")
-
-    except Exception as e:
-        print(f"[gap_analysis_agent] Persistence/Chaining failed for {case_id}: {e}")
-        db.rollback()
-        try:
-            if db_case:
-                db_case.status = CaseStatus.GAP_ANALYSIS_FAILED.value
-                db.add(db_case)
-                db.commit()
-                log_event(
-                    case_id    = case_id,
-                    agent_name = "GAP_ANALYSIS_AGENT",
-                    event      = "GAP_ANALYSIS_FAILED",
-                    status     = "FAILED",
-                    message    = str(e)
-                )
-        except Exception as err:
-            print(f"[gap_analysis_agent] Failed to mark gap analysis failure for {case_id}: {err}")
-    finally:
-        db.close()
-
-    print(f"[gap_analysis_agent] --- Completed for {case_id} ---\n")
-    print("result :",parsed)
     return {
         "case_id": case_id,
         "output":  parsed
