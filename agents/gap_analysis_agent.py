@@ -143,20 +143,11 @@ async def run_gap_analysis(props: dict) -> dict:
             event      = "POLICY_RULES_LOADING_STARTED",
             status     = "RUNNING"
         )
-        
-        with open(rules_path, 'r', encoding='utf-8') as f:
-            rules_data = json.load(f)
-            
-        if isinstance(rules_data, list) and len(rules_data) > 0:
-            target_data = rules_data[0].get("extracted_data", {})
-            for item in rules_data:
-                if item.get("file") == os.path.basename(pdf_path):
-                    target_data = item.get("extracted_data", {})
-                    break
-            
-            req_docs = target_data.get("required_documents", [])
-            required_docs_list = json.dumps(req_docs, indent=2)
-        else:
+        try:
+            from tools.policy_retriever import search_policy_criteria
+            required_docs_list = search_policy_criteria(doc_type="required_documents")
+        except Exception as inner_e:
+            print(f"[gap_analysis_agent] Chroma doc fetch failed: {inner_e}")
             required_docs_list = "[]"
             
         log_event(

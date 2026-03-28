@@ -23,21 +23,20 @@ def get_policy_vectorstore():
         )
     return _vectorstore
 
-def search_policy_criteria(query: str, k: int = 4) -> str:
+def search_policy_criteria(doc_type: str) -> str:
     """
-    Search the policy RAG database for specific criteria based on the patient's condition.
-    Returns the concatenated chunks of relevant policy rules.
+    Search the structured policy RAG database for a specific doc_type:
+    'required_documents', 'eligibility_criteria', or 'pa_document_format'.
+    Returns the explicitly extracted chunk.
     """
     db = get_policy_vectorstore()
     if not db:
         return "RAG DATABASE NOT FOUND. Please run scripts/ingest_policies.py first."
         
-    results = db.similarity_search(query, k=k)
-    if not results:
-        return "No relevant policy rules found."
+    results = db.get(where={"doc_type": doc_type})
+    if not results or not results.get("documents") or len(results["documents"]) == 0:
+        return f"No metadata match for type: {doc_type}"
         
-    formatted_docs = []
-    for i, doc in enumerate(results, 1):
-        formatted_docs.append(f"--- Policy Rule Extract {i} ---\n{doc.page_content}")
-        
-    return "\n\n".join(formatted_docs)
+    return results["documents"][0]
+
+
