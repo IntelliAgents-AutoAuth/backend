@@ -190,49 +190,31 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
     pa_format = "{}"
     policy_rules = "[]"
     
-    if os.path.exists(rules_path):
-        try:
-            with open(rules_path, 'r', encoding='utf-8') as f:
-                rules_data = json.load(f)
-            if rules_data and isinstance(rules_data, list):
-                target_data = rules_data[0].get("extracted_data", {})
-                for item in rules_data:
-                    if item.get("file") == os.path.basename(pdf_path) if pdf_path else False:
-                        target_data = item.get("extracted_data", {})
-                        break
-                
-                pa_format = json.dumps(target_data.get("pa_document_format", {}), indent=2)
-                bundled_rules = {
-                    "required_documents": target_data.get("required_documents", []),
-                    "eligibility_criteria": target_data.get("eligibility_criteria", [])
-                }
-                policy_rules = json.dumps(bundled_rules, indent=2)
-                
-                log_event(
-                    case_id     = case_id,
-                    agent_name  = "PA_DOCUMENT_AGENT",
-                    event       = "POLICY_RULES_LOADING_COMPLETED",
-                    status      = "SUCCESS",
-                    duration_ms = int((time.time() - pdf_start) * 1000)
-                )
-        except Exception as e:
-            log_event(
-                case_id    = case_id,
-                agent_name = "PA_DOCUMENT_AGENT",
-                event      = "POLICY_RULES_LOADING_FAILED",
-                status     = "FAILED",
-                message    = str(e)
-            )
-            print(f"[pa_document_agent] Policy rules loading failed: {e}")
-            policy_rules = "[]"
-    else:
+    try:
+        from tools.policy_retriever import search_policy_criteria
+        pa_format = search_policy_criteria(doc_type="pa_document_format")
+        req_docs = search_policy_criteria(doc_type="required_documents")
+        elig_crit = search_policy_criteria(doc_type="eligibility_criteria")
+        policy_rules = f"{req_docs}\n\n{elig_crit}"
+        
+        log_event(
+            case_id     = case_id,
+            agent_name  = "PA_DOCUMENT_AGENT",
+            event       = "POLICY_RULES_LOADING_COMPLETED",
+            status      = "SUCCESS",
+            duration_ms = int((time.time() - pdf_start) * 1000)
+        )
+    except Exception as e:
         log_event(
             case_id    = case_id,
             agent_name = "PA_DOCUMENT_AGENT",
             event      = "POLICY_RULES_LOADING_FAILED",
             status     = "FAILED",
-            message    = "Policy rules JSON not found"
+            message    = str(e)
         )
+        print(f"[pa_document_agent] Policy rules loading failed: {e}")
+        pa_format = "{}"
+        policy_rules = "[]"
 
     today = datetime.now().strftime("%B %d, %Y")
 

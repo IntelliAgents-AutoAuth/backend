@@ -184,9 +184,9 @@ def run_eligibility_check(props: dict) -> dict:
             if diagnosis:
                 try:
                     from tools.policy_retriever import search_policy_criteria
-                    rag_criteria = search_policy_criteria(f"Rules and requirements for {diagnosis}", k=4)
-                    eligibility_criteria_list += f"\n\n[RAG SEARCH RESULTS FOR {diagnosis.upper()}]:\n{rag_criteria}"
-                    print(f"[eligibility_agent] Augmented criteria with RAG search for {diagnosis}")
+                    rag_criteria = search_policy_criteria(doc_type="eligibility_criteria")
+                    eligibility_criteria_list = f"[RAG STRUCTURED RULES]:\n{rag_criteria}"
+                    print(f"[eligibility_agent] Loaded structured eligibility_criteria from ChromaDB")
                 except Exception as e:
                     print(f"[eligibility_agent] RAG fetch failed (is ChromaDB built?): {e}")
         else:
