@@ -94,7 +94,7 @@ def _invoke(prompt_template, variables: dict) -> str:
 # PUBLIC API
 # ─────────────────────────────────────────
 
-def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: str | None = None) -> dict:
+def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: str | None = None, ehr_data_cached: dict | None = None) -> dict:
     """
     Generate all LLM content for the PA document.
 
@@ -103,6 +103,7 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
         payer_name: Insurance payer name (Aetna, Cigna, etc.) for policy-specific rules.
                     If not supplied, extracted from EHR data.
         pdf_path: Path to policy PDF (optional, not used for policy selection).
+        ehr_data_cached: Pre-fetched EHR data from orchestrator memory (optional, Optimization 7).
 
     Returns:
         {
@@ -126,13 +127,28 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
 
     # 1. Fetch EHR
     ehr_fetch_start = time.time()
-    log_event(
-        case_id    = case_id,
-        agent_name = "PA_DOCUMENT_AGENT",
-        event      = "EHR_FETCH_STARTED",
-        status     = "RUNNING"
-    )
-    ehr = fetch_extracted_data_by_case(case_id) or {}
+    
+    # OPTIMIZATION 7: Try to use cached EHR data if provided
+    if ehr_data_cached:
+        log_event(
+            case_id    = case_id,
+            agent_name = "PA_DOCUMENT_AGENT",
+            event      = "EHR_CACHE_HIT",
+            status     = "SUCCESS"
+        )
+        ehr = ehr_data_cached
+        logger.info(f"[pa_document_agent] Using cached EHR data from memory for {case_id}")
+        print(f"[pa_document_agent] Using cached EHR data from memory (no fetch needed)")
+    else:
+        log_event(
+            case_id    = case_id,
+            agent_name = "PA_DOCUMENT_AGENT",
+            event      = "EHR_FETCH_STARTED",
+            status     = "RUNNING"
+        )
+        ehr = fetch_extracted_data_by_case(case_id) or {}
+        logger.info(f"[pa_document_agent] Fetched fresh EHR data for {case_id}")
+        print(f"[pa_document_agent] Fetched fresh EHR data (cache miss)")
     
     # Extract payer from EHR if not provided
     if not payer_name and isinstance(ehr, dict):

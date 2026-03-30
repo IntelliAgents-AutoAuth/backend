@@ -57,6 +57,7 @@ class OrchestratorMemory(BaseChatMessageHistory):
     def __init__(self, case_id: str):
         self.case_id = case_id
         self._log: list[dict] = []
+        self._data_cache: dict[str, Any] = {}  # L1 in-memory cache for arbitrary data (e.g., EHR)
 
     # ─────────────────────────────────────────
     # LANGCHAIN PROXY (read-only for messages)
@@ -123,9 +124,28 @@ class OrchestratorMemory(BaseChatMessageHistory):
     def clear(self) -> None:
         """Clear both L1 RAM and prepare for L2 purge."""
         self._log = []
+        self._data_cache = {}
         if self.case_id in _MEMORY_CACHE:
             del _MEMORY_CACHE[self.case_id]
         logger.info(f"[memory] Cleared memory for case {self.case_id}")
+
+    # ─────────────────────────────────────────
+    # DATA CACHING (for arbitrary objects like EHR data)
+    # ─────────────────────────────────────────
+
+    def set_cached_data(self, key: str, value: Any) -> None:
+        """Store arbitrary data in L1 cache (e.g., EHR data for multi-agent access)."""
+        self._data_cache[key] = value
+        logger.info(f"[memory] Cached data for key='{key}' in case {self.case_id}")
+
+    def get_cached_data(self, key: str) -> Any | None:
+        """Retrieve cached data (e.g., EHR data) from L1 cache."""
+        value = self._data_cache.get(key)
+        if value is not None:
+            logger.info(f"[memory] Cache HIT for key='{key}' in case {self.case_id}")
+        else:
+            logger.info(f"[memory] Cache MISS for key='{key}' in case {self.case_id}")
+        return value
 
     # ─────────────────────────────────────────
     # PERSISTENCE (L1/L2 logic)

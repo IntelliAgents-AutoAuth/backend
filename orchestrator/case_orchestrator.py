@@ -22,10 +22,12 @@ The orchestrator owns all routing logic via an LLM Supervisor.
 
 import os
 import json
+import time
 import asyncio
 import traceback
 import logging
 from datetime import datetime, timezone
+from functools import partial
 from sqlalchemy.orm import Session
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -152,6 +154,21 @@ class CaseOrchestrator:
                 f"Status={db_case.status} | "
                 f"Memory so far: {self.memory.summary()}"
             )
+
+            # OPTIMIZATION 7: EHR Cache in Memory - fetch once at start, pass to all agents
+            try:
+                from tools.ehr_fetcher import fetch_extracted_data_by_case
+                ehr_start = time.time()
+                ehr_data = fetch_extracted_data_by_case(self.case_id)
+                if ehr_data:
+                    self.memory.set_cached_data("ehr_data", ehr_data)
+                    ehr_elapsed = time.time() - ehr_start
+                    logger.info(
+                        f"[orchestrator] Pre-fetched and cached EHR data for {self.case_id} "
+                        f"({ehr_elapsed:.2f}s) — all agents will read from cache"
+                    )
+            except Exception as e:
+                logger.warning(f"[orchestrator] Failed to pre-fetch EHR data: {e}")
 
             in_progress_statuses = {
                 CaseStatus.EHR_FETCHING.value,
@@ -544,6 +561,7 @@ class CaseOrchestrator:
                 "previous_gap_result": previous_gap,
                 "newly_uploaded_files": newly_uploaded,
                 "payer_name": db_case.insurance_company,
+                "ehr_data_cached": self.memory.get_cached_data("ehr_data"),  # Opt 7: Pass cached EHR
             }
             result = await run_gap_analysis_delta(agent_props)
             log_event(self.case_id, "ORCHESTRATOR", "USING_DELTA_ANALYSIS", "RUNNING", "Lightweight re-analysis for uploads")
@@ -557,6 +575,7 @@ class CaseOrchestrator:
                 "patient_name": f"Patient {db_case.patient_id}",
                 "pdf_path": payload.get("pdf_path"),
                 "payer_name": db_case.insurance_company,
+                "ehr_data_cached": self.memory.get_cached_data("ehr_data"),  # Opt 7: Pass cached EHR
             }
             result = await run_gap_analysis(agent_props)
         
@@ -633,6 +652,7 @@ class CaseOrchestrator:
                 "payer_name": db_case.insurance_company,
                 # Gap context is implicitly available via DB; we log it in memory
                 "_gap_context": gap_output,
+                "ehr_data_cached": self.memory.get_cached_data("ehr_data"),  # Opt 7: Pass cached EHR
             },
         )
 
@@ -676,8 +696,15 @@ class CaseOrchestrator:
         if eligibility_output:
             logger.info(f"[orchestrator] PA gen has access to eligibility result from memory.")
 
+        # Opt 7: Pass cached EHR data to PA document agent
+        ehr_cached = self.memory.get_cached_data("ehr_data")
+        pa_content_func = partial(
+            generate_pa_content,
+            ehr_data_cached=ehr_cached
+        )
+        
         content = await loop.run_in_executor(
-            None, generate_pa_content, self.case_id, db_case.insurance_company, payload.get("pdf_path")
+            None, pa_content_func, self.case_id, db_case.insurance_company, payload.get("pdf_path")
         )
 
         # Collect uploaded file paths to attach to the PDF

@@ -125,14 +125,32 @@ def run_eligibility_check(props: dict) -> dict:
 
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
+        
+        # OPTIMIZATION 7: Try to get EHR from orchestrator memory cache first
+        ehr_from_cache = props.get("ehr_data_cached")
         ehr_start = time.time()
-        log_event(
-            case_id    = case_id,
-            agent_name = "ELIGIBILITY_AGENT",
-            event      = "EHR_FETCH_STARTED",
-            status     = "RUNNING"
-        )
-        raw_ehr = fetch_extracted_data_by_case(case_id)
+        
+        if ehr_from_cache:
+            log_event(
+                case_id    = case_id,
+                agent_name = "ELIGIBILITY_AGENT",
+                event      = "EHR_CACHE_HIT",
+                status     = "SUCCESS"
+            )
+            raw_ehr = ehr_from_cache
+            logger.info(f"[eligibility_agent] Using cached EHR data from memory for {case_id}")
+            print(f"[eligibility_agent] Using cached EHR data from memory (no fetch needed)")
+        else:
+            log_event(
+                case_id    = case_id,
+                agent_name = "ELIGIBILITY_AGENT",
+                event      = "EHR_FETCH_STARTED",
+                status     = "RUNNING"
+            )
+            raw_ehr = fetch_extracted_data_by_case(case_id)
+            logger.info(f"[eligibility_agent] Fetched fresh EHR data for {case_id}")
+            print(f"[eligibility_agent] Fetched fresh EHR data (cache miss)")
+        
         if raw_ehr:
             ehr_data = json.dumps(raw_ehr, indent=2, default=str)
             
