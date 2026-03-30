@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import re
+import logging
 from datetime import datetime
 from utils.agent_logger import log_event
 from utils.llm_util import get_keys, get_model_order
@@ -35,6 +36,8 @@ from prompts.pa_document_prompts import (
 )
 from tools.ehr_fetcher import fetch_extracted_data_by_case
 from tools.pdf_extractor import extract_raw_text
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────
 # LLM SINGLETON
@@ -91,14 +94,15 @@ def _invoke(prompt_template, variables: dict) -> str:
 # PUBLIC API
 # ─────────────────────────────────────────
 
-def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
+def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: str | None = None) -> dict:
     """
     Generate all LLM content for the PA document.
 
     Args:
         case_id:  Case identifier — used to fetch EHR data.
-        pdf_path: Path to policy PDF — used to build the checklist.
-                  Defaults to aetna/test_doc.pdf if not supplied.
+        payer_name: Insurance payer name (Aetna, Cigna, etc.) for policy-specific rules.
+                    If not supplied, extracted from EHR data.
+        pdf_path: Path to policy PDF (optional, not used for policy selection).
 
     Returns:
         {
@@ -117,7 +121,7 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
         agent_name = "PA_DOCUMENT_AGENT",
         event      = "DOCUMENT_GENERATION_STARTED",
         status     = "RUNNING",
-        message    = "Prior Auth package generation triggered"
+        message    = f"Prior Auth package generation triggered for {payer_name}"
     )
 
     # 1. Fetch EHR
@@ -129,6 +133,10 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
         status     = "RUNNING"
     )
     ehr = fetch_extracted_data_by_case(case_id) or {}
+    
+    # Extract payer from EHR if not provided
+    if not payer_name and isinstance(ehr, dict):
+        payer_name = ehr.get("payer_name") or ehr.get("insurance_company")
     
     # Robust Fallback: Try fetching raw EHR data if extracted_data is empty
     if not ehr:
@@ -149,6 +157,10 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
                     ehr["patient_last_name"] = str(db_case.patient_id)
                     ehr["date_of_birth"] = "N/A (Update in Records)"
                     ehr["insurance_company"] = "N/A"
+                    
+                    # Get payer from case if not in EHR
+                    if not payer_name:
+                        payer_name = db_case.insurance_company
     
     # Bundle pre-summarized data
     summarized_data_path = os.path.join(backend_dir, "uploads", "all_summarized_data.json")
@@ -186,15 +198,14 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
         event      = "POLICY_RULES_LOADING_STARTED",
         status     = "RUNNING"
     )
-    rules_path = os.path.join(backend_dir, "policy-pdfs", "extracted_policy_rules.json")
     pa_format = "{}"
     policy_rules = "[]"
     
     try:
         from tools.policy_retriever import search_policy_criteria
-        pa_format = search_policy_criteria(doc_type="pa_document_format")
-        req_docs = search_policy_criteria(doc_type="required_documents")
-        elig_crit = search_policy_criteria(doc_type="eligibility_criteria")
+        pa_format = search_policy_criteria(doc_type="pa_document_format", payer=payer_name)
+        req_docs = search_policy_criteria(doc_type="required_documents", payer=payer_name)
+        elig_crit = search_policy_criteria(doc_type="eligibility_criteria", payer=payer_name)
         policy_rules = f"{req_docs}\n\n{elig_crit}"
         
         log_event(
@@ -202,9 +213,23 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
             agent_name  = "PA_DOCUMENT_AGENT",
             event       = "POLICY_RULES_LOADING_COMPLETED",
             status      = "SUCCESS",
+            message     = f"Policy data loaded for {payer_name}",
             duration_ms = int((time.time() - pdf_start) * 1000)
         )
+    except ValueError as e:
+        logger.warning(f"[pa_document_agent] Policy data unavailable for {payer_name}: {e}. Using defaults.")
+        log_event(
+            case_id    = case_id,
+            agent_name = "PA_DOCUMENT_AGENT",
+            event      = "POLICY_RULES_LOADING_PARTIAL",
+            status     = "PARTIAL",
+            message    = f"Policy data unavailable for {payer_name}, using defaults"
+        )
+        print(f"[pa_document_agent] Policy rules loading partial (using defaults): {e}")
+        pa_format = "{}"
+        policy_rules = "[]"
     except Exception as e:
+        logger.error(f"[pa_document_agent] Unexpected RAG error: {e}")
         log_event(
             case_id    = case_id,
             agent_name = "PA_DOCUMENT_AGENT",

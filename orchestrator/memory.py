@@ -215,6 +215,24 @@ class OrchestratorMemory(BaseChatMessageHistory):
                 return entry.get("result") or entry.get("metadata")
         return None
 
+    def get_timestamp(self, step: str) -> datetime | None:
+        """
+        Return the timestamp of the last execution of a step.
+        Used for cache freshness checks (e.g., EHR fetch within 5 minutes).
+        
+        Returns:
+            datetime object or None if step not found
+        """
+        for entry in reversed(self._log):
+            if (entry.get("step") or entry.get("event")) == step:
+                ts_str = entry.get("timestamp")
+                if ts_str:
+                    try:
+                        return datetime.fromisoformat(ts_str)
+                    except Exception:
+                        return None
+        return None
+
     def get_history(self) -> list[dict]:
         """Return history from L1 in-memory log."""
         return list(self._log)

@@ -32,6 +32,8 @@ logging.getLogger("httpx").setLevel(logging.ERROR)
 # ─────────────────────────────────────────
 load_dotenv(os.path.join(backend_dir, ".env"))
 
+logger = logging.getLogger(__name__)
+
 # ─────────────────────────────────────────
 # LAZY SINGLETON — Direct LLM chain (no agent loop)
 # ─────────────────────────────────────────
@@ -80,15 +82,11 @@ async def run_gap_analysis(props: dict) -> dict:
       }
     """
     case_id      = props.get("case_id")
-    pdf_path     = props.get("pdf_path")
-    if not pdf_path or not os.path.exists(pdf_path):
-        pdf_path = os.path.join(
-            backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
-        )
+    payer_name   = props.get("payer_name")
     patient_name = props.get("patient_name", "Unknown")
 
     from crud import crud_case
-    print(f"\n[gap_analysis_agent] Gap analysis triggered for case_id={case_id}, patient={patient_name}")
+    print(f"\n[gap_analysis_agent] Gap analysis triggered for case_id={case_id}, patient={patient_name}, payer={payer_name}")
     print(f"[gap_analysis_agent] --- Started for {case_id} ---")
 
     agent_start = time.time()
@@ -97,7 +95,7 @@ async def run_gap_analysis(props: dict) -> dict:
         agent_name = "GAP_ANALYSIS_AGENT",
         event      = "GAP_ANALYSIS_STARTED",
         status     = "RUNNING",
-        message    = "Gap analysis triggered"
+        message    = f"Gap analysis triggered for {payer_name}"
     )
 
     # ── 1. PRE-EXTRACT DATA ──────────────────
@@ -105,30 +103,47 @@ async def run_gap_analysis(props: dict) -> dict:
     ehr_data = "ERROR: Failed to fetch EHR data."
 
     try:
-        rules_path = os.path.join(backend_dir, "policy-pdfs", "extracted_policy_rules.json")
-        pdf_start = time.time()
+        from tools.policy_retriever import search_policy_criteria
+        
+        # Try to get payer from case if not provided
+        if not payer_name:
+            try:
+                db_case = crud_case.get_case(SessionLocal(), case_id=case_id)
+                if db_case:
+                    payer_name = db_case.insurance_company
+            except Exception:
+                pass
+        
+        # Load required documents with payer filtering
+        try:
+            required_docs_list = search_policy_criteria(doc_type="required_documents", payer=payer_name)
+            log_event(
+                case_id    = case_id,
+                agent_name = "GAP_ANALYSIS_AGENT",
+                event      = "POLICY_DATA_LOADED",
+                status     = "SUCCESS",
+                message    = f"Required documents loaded for {payer_name} from RAG"
+            )
+            print(f"[gap_analysis_agent] Policy documents loaded for {payer_name}")
+        except ValueError as e:
+            logger.warning(f"[gap_analysis_agent] Policy data unavailable for {payer_name}: {e}. Using empty list.")
+            print(f"[gap_analysis_agent] Policy data unavailable: {e}")
+            required_docs_list = "[]"
+        except Exception as inner_e:
+            logger.error(f"[gap_analysis_agent] Unexpected RAG error: {inner_e}")
+            print(f"[gap_analysis_agent] RAG fetch failed: {inner_e}")
+            required_docs_list = "[]"
+    except Exception as e:
         log_event(
             case_id    = case_id,
             agent_name = "GAP_ANALYSIS_AGENT",
-            event      = "POLICY_RULES_LOADING_STARTED",
-            status     = "RUNNING"
+            event      = "POLICY_RULES_LOADING_FAILED",
+            status     = "FAILED",
+            message    = str(e)
         )
-        try:
-            from tools.policy_retriever import search_policy_criteria
-            required_docs_list = search_policy_criteria(doc_type="required_documents")
-        except Exception as inner_e:
-            print(f"[gap_analysis_agent] Chroma doc fetch failed: {inner_e}")
-            required_docs_list = "[]"
-            
-        log_event(
-            case_id     = case_id,
-            agent_name  = "GAP_ANALYSIS_AGENT",
-            event       = "POLICY_RULES_LOADING_COMPLETED",
-            status      = "SUCCESS",
-            message     = f"Loaded required documents list successfully",
-            duration_ms = int((time.time() - pdf_start) * 1000)
-        )
-        print(f"[gap_analysis_agent] Required docs list loaded successfully from extracted rules.")
+        print(f"[gap_analysis_agent] Policy loading failed: {e}")
+        logger.error(f"[gap_analysis_agent] Policy loading failed: {e}")
+        required_docs_list = "[]"
     except Exception as e:
         log_event(
             case_id    = case_id,
@@ -299,6 +314,180 @@ INSTRUCTIONS:
         "case_id": case_id,
         "output":  parsed
     }
+
+
+# ─────────────────────────────────────────
+# OPTIMIZATION 4: Delta Gap Analysis
+# Lightweight re-analysis for file uploads
+# ─────────────────────────────────────────
+
+def _extract_doc_keys(doc_name: str) -> set[str]:
+    """
+    Extract matching keywords from document name for fuzzy matching.
+    Example: "Surgical Notes Report" → {"surgical", "notes", "report"}
+    """
+    if not isinstance(doc_name, str):
+        return set()
+    return {word.lower().strip() for word in doc_name.split() if len(word) > 2}
+
+
+def _covers_gap(missing_doc: dict, uploaded_files: list) -> bool:
+    """
+    Check if any uploaded file likely covers the missing document.
+    Uses fuzzy keyword matching.
+    
+    Args:
+        missing_doc: {"document_name": str, "document_key": str, ...}
+        uploaded_files: List of {"document_name": str, "missing_key": str, "file_path": str, ...}
+    
+    Returns:
+        True if uploaded file likely covers this gap
+    """
+    if not uploaded_files or not isinstance(uploaded_files, list):
+        return False
+    
+    missing_name = missing_doc.get("document_name", "").lower()
+    missing_key = missing_doc.get("document_key", "").lower()
+    
+    missing_keywords = _extract_doc_keys(missing_name) | _extract_doc_keys(missing_key)
+    
+    for uploaded in uploaded_files:
+        uploaded_name = uploaded.get("document_name", "").lower()
+        uploaded_key = uploaded.get("missing_key", "").lower()
+        
+        uploaded_keywords = _extract_doc_keys(uploaded_name) | _extract_doc_keys(uploaded_key)
+        
+        # Check overlap: if 50%+ of missing keywords match uploaded, consider it covered
+        if missing_keywords and uploaded_keywords:
+            overlap = len(missing_keywords & uploaded_keywords)
+            coverage = overlap / len(missing_keywords)
+            if coverage >= 0.5:
+                return True
+    
+    return False
+
+
+async def run_gap_analysis_delta(props: dict) -> dict:
+    """
+    OPTIMIZATION 4: Lightweight gap analysis for file uploads.
+    
+    Instead of re-running full LLM analysis, this:
+    1. Compares newly uploaded files vs previously identified gaps
+    2. Performs quick keyword matching (no LLM needed for obvious matches)
+    3. Only calls LLM if complex matching is needed
+    4. Returns incremental update instead of full re-analysis
+    
+    Args:
+        props = {
+            "case_id": str,
+            "previous_gap_result": dict (from prior gap_analysis),
+            "newly_uploaded_files": list of new uploads,
+            "payer_name": str (optional)
+        }
+    
+    Returns:
+        dict with updated gap analysis
+    """
+    case_id = props.get("case_id")
+    previous_gaps = props.get("previous_gap_result", {}) or {}
+    newly_uploaded = props.get("newly_uploaded_files", []) or []
+    payer_name = props.get("payer_name")
+    
+    logger.info(f"[gap_analysis_agent] Delta analysis for {case_id}: {len(newly_uploaded)} new files")
+    log_event(
+        case_id=case_id,
+        agent_name="GAP_ANALYSIS_AGENT",
+        event="DELTA_ANALYSIS_STARTED",
+        status="RUNNING",
+        message=f"Delta gap analysis for {len(newly_uploaded)} uploaded files"
+    )
+    
+    # Extract previous missing documents
+    missing_docs = previous_gaps.get("missing_documents", [])
+    
+    if not missing_docs:
+        # No previous gaps - analysis already cleared
+        logger.info(f"[gap_analysis_agent] No previous gaps for {case_id}, returning cleared status")
+        return {
+            "case_id": case_id,
+            "output": {
+                "status": "GAP_CLEARED",
+                "summary": {
+                    "total_required": previous_gaps.get("summary", {}).get("total_required", 0),
+                    "total_matched": previous_gaps.get("summary", {}).get("total_required", 0),
+                    "total_missing": 0,
+                    "gap_percentage": 0
+                },
+                "missing_documents": [],
+                "matched_documents": previous_gaps.get("matched_documents", []),
+                "reason": "Delta analysis: no gaps to cover"
+            }
+        }
+    
+    # Quick check: do new files cover ALL gaps?
+    remaining_gaps = []
+    newly_matched = []
+    
+    for gap in missing_docs:
+        if _covers_gap(gap, newly_uploaded):
+            newly_matched.append(gap)
+            logger.info(f"[gap_analysis_agent] Gap '{gap.get('document_name')}' covered by uploads")
+        else:
+            remaining_gaps.append(gap)
+    
+    # Determine status
+    if not remaining_gaps:
+        # All gaps satisfied!
+        logger.info(f"[gap_analysis_agent] Delta analysis complete: ALL GAPS CLEARED")
+        log_event(
+            case_id=case_id,
+            agent_name="GAP_ANALYSIS_AGENT",
+            event="DELTA_ANALYSIS_COMPLETED",
+            status="SUCCESS",
+            message=f"Delta analysis: {len(newly_matched)} gaps covered"
+        )
+        
+        return {
+            "case_id": case_id,
+            "output": {
+                "status": "GAP_CLEARED",
+                "summary": {
+                    "total_required": previous_gaps.get("summary", {}).get("total_required", 0),
+                    "total_matched": previous_gaps.get("summary", {}).get("total_required", 0),
+                    "total_missing": 0,
+                    "gap_percentage": 0
+                },
+                "missing_documents": [],
+                "matched_documents": previous_gaps.get("matched_documents", []) + newly_matched,
+                "reason": "Delta analysis: all gaps cleared by uploads"
+            }
+        }
+    else:
+        # Some gaps remain
+        logger.info(f"[gap_analysis_agent] Delta analysis: {len(remaining_gaps)} gaps remain")
+        log_event(
+            case_id=case_id,
+            agent_name="GAP_ANALYSIS_AGENT",
+            event="DELTA_ANALYSIS_COMPLETED",
+            status="SUCCESS",
+            message=f"Delta analysis: {len(remaining_gaps)} gaps remain"
+        )
+        
+        return {
+            "case_id": case_id,
+            "output": {
+                "status": "GAP_FOUND",
+                "summary": {
+                    "total_required": previous_gaps.get("summary", {}).get("total_required", 0),
+                    "total_matched": len(newly_matched) + len(previous_gaps.get("matched_documents", [])),
+                    "total_missing": len(remaining_gaps),
+                    "gap_percentage": round((len(remaining_gaps) / max(previous_gaps.get("summary", {}).get("total_required", 1), 1)) * 100, 1)
+                },
+                "missing_documents": remaining_gaps,
+                "matched_documents": previous_gaps.get("matched_documents", []) + newly_matched,
+                "reason": "Delta analysis: some gaps remain"
+            }
+        }
 
 
 # ─────────────────────────────────────────

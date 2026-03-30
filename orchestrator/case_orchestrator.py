@@ -159,7 +159,8 @@ class CaseOrchestrator:
                 CaseStatus.ELIGIBILITY_RUNNING.value,
                 CaseStatus.PACKET_GENERATING.value,
             }
-            if trigger != "RETRY" and db_case.status in in_progress_statuses:
+            # Allow DOCUMENTS_UPLOADED to bypass in-progress check (enables re-analysis during eligibility)
+            if trigger != "RETRY" and trigger != "DOCUMENTS_UPLOADED" and db_case.status in in_progress_statuses:
                 logger.info(
                     f"[orchestrator] Ignoring trigger '{trigger}' for {self.case_id}: "
                     f"case is already in-progress with status={db_case.status}."
@@ -170,11 +171,42 @@ class CaseOrchestrator:
                 await self._handle_retry(db, db_case, payload)
                 return
 
+            # Store trigger for use by steps (Optimization 4: Delta Analysis needs to know trigger)
+            self._current_trigger = trigger
+
             # AI Thinking & Step resolution
-            # Initial decision based on the trigger
-            decision = await self._resolve_next_step_llm(db, db_case, trigger, payload)
-            current_step = decision.get("next_step")
-            thinking = decision.get("thinking", "No explanation provided.")
+            # Optimization: For deterministic triggers, skip expensive LLM call
+            DETERMINISTIC_TRIGGERS = {
+                "CASE_CREATED",
+                "SYNC_REQUESTED",
+                "ELIGIBILITY_REQUESTED",
+                "GENERATE_PACKET_REQUESTED",
+            }
+            
+            # Special case: DOCUMENTS_UPLOADED during in-progress should use LLM (more intelligent)
+            # This prevents hardcoded routing from breaking in edge cases
+            use_llm_for_document_upload = (
+                trigger == "DOCUMENTS_UPLOADED" and 
+                db_case.status in {
+                    CaseStatus.ELIGIBILITY_RUNNING.value,
+                    CaseStatus.PACKET_GENERATING.value,
+                }
+            )
+            
+            if trigger in DETERMINISTIC_TRIGGERS and not use_llm_for_document_upload:
+                # Skip LLM Supervisor - we already know the next step for these triggers
+                logger.info(f"[orchestrator] Using deterministic path for trigger={trigger} (skipping LLM Supervisor)")
+                current_step = self._resolve_next_step(trigger, db_case.status)
+                thinking = f"Deterministic route (no LLM needed) for trigger={trigger}"
+            else:
+                # For ambiguous triggers OR document uploads during in-progress, use LLM to decide
+                if use_llm_for_document_upload:
+                    logger.info(f"[orchestrator] Using LLM Supervisor for DOCUMENTS_UPLOADED (case in-progress)")
+                else:
+                    logger.info(f"[orchestrator] Using LLM Supervisor for ambiguous trigger={trigger}")
+                decision = await self._resolve_next_step_llm(db, db_case, trigger, payload)
+                current_step = decision.get("next_step")
+                thinking = decision.get("thinking", "No explanation provided.")
 
             # State machine loop
             executed_steps = 0
@@ -432,7 +464,37 @@ class CaseOrchestrator:
     # ─────────────────────────────────────────
 
     async def _step_ehr_fetch(self, db: Session, db_case, payload: dict) -> dict:
-        """Step 1 — Fetch and extract EHR data for the patient."""
+        """
+        Step 1 — Fetch and extract EHR data for the patient.
+        
+        OPTIMIZATION 3: EHR Smart Cache
+        - First fetch: Query database (300-500ms)
+        - Within 5 minutes: Return cached result (<1ms)
+        - After 5 minutes: Fresh fetch again
+        """
+        import time
+        
+        # ──── CACHE CHECK (NEW - Optimization 3) ────
+        EHR_CACHE_TTL_SECONDS = 300  # 5 minutes
+        
+        last_ehr_fetch_time = self.memory.get_timestamp("ehr_fetch")
+        if last_ehr_fetch_time:
+            seconds_since = (datetime.now(timezone.utc) - last_ehr_fetch_time).total_seconds()
+            if seconds_since < EHR_CACHE_TTL_SECONDS:
+                # EHR cache still fresh - return cached result
+                logger.info(
+                    f"[orchestrator] EHR cache HIT for {self.case_id}: "
+                    f"last fetch {seconds_since:.1f}s ago (TTL={EHR_CACHE_TTL_SECONDS}s)"
+                )
+                # Return same event as normal fetch (orchestrator doesn't know difference)
+                return {"event": "EHR_FETCH_DONE"}
+            else:
+                logger.info(
+                    f"[orchestrator] EHR cache EXPIRED for {self.case_id}: "
+                    f"last fetch {seconds_since:.1f}s ago (TTL={EHR_CACHE_TTL_SECONDS}s)"
+                )
+        
+        # ──── FRESH EHR FETCH ────
         db_case.status = CaseStatus.EHR_FETCHING.value
         db.add(db_case)
         db.commit()
@@ -449,17 +511,55 @@ class CaseOrchestrator:
         return {"event": "EHR_FETCH_DONE"}
 
     async def _step_gap_analysis(self, db: Session, db_case, payload: dict) -> dict:
-        """Step 2 — Run gap analysis LLM agent."""
+        """
+        Step 2 — Run gap analysis LLM agent.
+        
+        OPTIMIZATION 4: Delta Gap Analysis
+        - First run: Full LLM analysis (expensive)
+        - Re-runs on file upload: Use lightweight delta version (fast)
+        """
+        from agents.gap_analysis_agent import run_gap_analysis_delta
+        
         db_case.status = CaseStatus.GAP_ANALYSIS_RUNNING.value
         db.add(db_case)
         db.commit()
 
-        agent_props = {
-            "case_id": self.case_id,
-            "patient_name": f"Patient {db_case.patient_id}",
-            "pdf_path": payload.get("pdf_path"),
-        }
-        result = await run_gap_analysis(agent_props)
+        # ──── OPTIMIZATION 4: Detect if we should use Delta Analysis ────
+        trigger = getattr(self, '_current_trigger', None)  # Will be set by run() method
+        use_delta = (
+            trigger == "DOCUMENTS_UPLOADED" and 
+            self.memory.succeeded("gap_analysis")  # Prior gap analysis exists
+        )
+        
+        if use_delta:
+            # Lightweight delta analysis - compare new files vs old gaps
+            logger.info(f"[orchestrator] Using DELTA gap analysis for {self.case_id} (file upload trigger)")
+            
+            previous_gap = self.memory.get_last_result("gap_analysis")
+            newly_uploaded = db_case.uploaded_files[-len(db_case.uploaded_files) + max(0, len(db_case.uploaded_files) - 5):] \
+                           if db_case.uploaded_files else []
+            
+            agent_props = {
+                "case_id": self.case_id,
+                "previous_gap_result": previous_gap,
+                "newly_uploaded_files": newly_uploaded,
+                "payer_name": db_case.insurance_company,
+            }
+            result = await run_gap_analysis_delta(agent_props)
+            log_event(self.case_id, "ORCHESTRATOR", "USING_DELTA_ANALYSIS", "RUNNING", "Lightweight re-analysis for uploads")
+        
+        else:
+            # Full gap analysis (first run or other triggers)
+            logger.info(f"[orchestrator] Using FULL gap analysis for {self.case_id}")
+            
+            agent_props = {
+                "case_id": self.case_id,
+                "patient_name": f"Patient {db_case.patient_id}",
+                "pdf_path": payload.get("pdf_path"),
+                "payer_name": db_case.insurance_company,
+            }
+            result = await run_gap_analysis(agent_props)
+        
         parsed = result.get("output") or {}
 
         # ── PERSISTENCE (Moved from agent to Orchestrator) ──
@@ -530,6 +630,7 @@ class CaseOrchestrator:
             {
                 "case_id": self.case_id,
                 "pdf_path": payload.get("pdf_path"),
+                "payer_name": db_case.insurance_company,
                 # Gap context is implicitly available via DB; we log it in memory
                 "_gap_context": gap_output,
             },
@@ -576,7 +677,7 @@ class CaseOrchestrator:
             logger.info(f"[orchestrator] PA gen has access to eligibility result from memory.")
 
         content = await loop.run_in_executor(
-            None, generate_pa_content, self.case_id, payload.get("pdf_path")
+            None, generate_pa_content, self.case_id, db_case.insurance_company, payload.get("pdf_path")
         )
 
         # Collect uploaded file paths to attach to the PDF

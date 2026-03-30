@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import json
+import logging
 
 # Ensure backend root is on sys.path for local imports
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +26,8 @@ from constants.cases import CaseStatus
 import time
 
 from prompts.eligibility_prompts import get_eligibility_prompt
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────
 # 1. SINGLETON LLM CHAIN (direct call, no agent loop)
@@ -87,8 +90,9 @@ def run_eligibility_check(props: dict) -> dict:
 
     Input:
         props = {
-            "case_id": str,           # used by ehr_fetcher to pull the EHR
-            "pdf_path": str | None,   # policy PDF; defaults to aetna/test_doc.pdf
+            "case_id": str,                      # used by ehr_fetcher to pull the EHR
+            "payer_name": str | None,            # Insurance payer (Aetna, Cigna, etc.)
+            "pdf_path": str | None,              # policy PDF; optional
         }
 
     Output:
@@ -101,12 +105,7 @@ def run_eligibility_check(props: dict) -> dict:
     """
     case_id  = props.get("case_id")
     pdf_path = props.get("pdf_path")
-
-    # Default PDF path when none is explicitly provided
-    if not pdf_path:
-        pdf_path = os.path.join(
-            backend_dir, "policy-pdfs", "aetna", "test_doc.pdf"
-        )
+    payer_name = props.get("payer_name")
 
     all_keys = get_keys()
     agent_start = time.time()
@@ -116,55 +115,13 @@ def run_eligibility_check(props: dict) -> dict:
         agent_name = "ELIGIBILITY_AGENT",
         event      = "ELIGIBILITY_CHECK_STARTED",
         status     = "RUNNING",
-        message    = "Eligibility check triggered"
+        message    = f"Eligibility check triggered (payer={payer_name})"
     )
 
     # ── 1. PRE-EXTRACT DATA ──────────────────
     eligibility_criteria_list = "ERROR: Failed to load eligibility criteria."
     ehr_data = "ERROR: Failed to fetch EHR data."
-
-    try:
-        rules_path = os.path.join(backend_dir, "policy-pdfs", "extracted_policy_rules.json")
-        pdf_start = time.time()
-        log_event(
-            case_id    = case_id,
-            agent_name = "ELIGIBILITY_AGENT",
-            event      = "POLICY_RULES_LOADING_STARTED",
-            status     = "RUNNING"
-        )
-        with open(rules_path, 'r', encoding='utf-8') as f:
-            rules_data = json.load(f)
-            
-        if isinstance(rules_data, list) and len(rules_data) > 0:
-            target_data = rules_data[0].get("extracted_data", {})
-            for item in rules_data:
-                if item.get("file") == os.path.basename(pdf_path):
-                    target_data = item.get("extracted_data", {})
-                    break
-            
-            crit_docs = target_data.get("eligibility_criteria", [])
-            eligibility_criteria_list = json.dumps(crit_docs, indent=2)
-        else:
-            eligibility_criteria_list = "[]"
-            
-        log_event(
-            case_id     = case_id,
-            agent_name  = "ELIGIBILITY_AGENT",
-            event       = "POLICY_RULES_LOADING_COMPLETED",
-            status      = "SUCCESS",
-            message     = f"Loaded eligibility criteria successfully",
-            duration_ms = int((time.time() - pdf_start) * 1000)
-        )
-        print(f"[eligibility_agent] Eligibility criteria loaded successfully from extracted rules.")
-    except Exception as e:
-        log_event(
-            case_id    = case_id,
-            agent_name = "ELIGIBILITY_AGENT",
-            event      = "POLICY_RULES_LOADING_FAILED",
-            status     = "FAILED",
-            message    = str(e)
-        )
-        print(f"[eligibility_agent] Policy Rules Loading failed: {e}")
+    uploaded_evidence = ""  # Initialize to prevent UnboundLocalError (Opt 4 fix)
 
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
@@ -179,18 +136,48 @@ def run_eligibility_check(props: dict) -> dict:
         if raw_ehr:
             ehr_data = json.dumps(raw_ehr, indent=2, default=str)
             
-            # --- RAG POLICY ENHANCEMENT ---
-            diagnosis = raw_ehr.get("primary_diagnosis") or raw_ehr.get("diagnosis")
-            if diagnosis:
-                try:
-                    from tools.policy_retriever import search_policy_criteria
-                    rag_criteria = search_policy_criteria(doc_type="eligibility_criteria")
-                    eligibility_criteria_list = f"[RAG STRUCTURED RULES]:\n{rag_criteria}"
-                    print(f"[eligibility_agent] Loaded structured eligibility_criteria from ChromaDB")
-                except Exception as e:
-                    print(f"[eligibility_agent] RAG fetch failed (is ChromaDB built?): {e}")
+            # Extract payer from EHR if not provided
+            if not payer_name:
+                payer_name = raw_ehr.get("payer_name") or raw_ehr.get("insurance_company")
+            
+            # Load policy criteria with payer filtering
+            try:
+                from tools.policy_retriever import search_policy_criteria
+                rag_criteria = search_policy_criteria(doc_type="eligibility_criteria", payer=payer_name)
+                eligibility_criteria_list = f"[RAG STRUCTURED RULES]:\n{rag_criteria}"
+                logger.info(f"[eligibility_agent] Loaded eligibility_criteria for {payer_name}")
+                print(f"[eligibility_agent] Loaded structured eligibility_criteria from RAG for {payer_name}")
+            except ValueError as e:
+                logger.warning(f"[eligibility_agent] Policy data unavailable for {payer_name}: {e}. Using default criteria.")
+                print(f"[eligibility_agent] RAG fetch failed: {e}")
+                eligibility_criteria_list = "[]"
+            except Exception as e:
+                logger.error(f"[eligibility_agent] Unexpected RAG error: {e}")
+                print(f"[eligibility_agent] Unexpected RAG error: {e}")
+                eligibility_criteria_list = "[]"
         else:
             ehr_data = "No specific patient data found."
+            logger.warning(f"[eligibility_agent] No EHR data found for case {case_id}")
+            eligibility_criteria_list = "[]"
+        
+        log_event(
+            case_id     = case_id,
+            agent_name  = "ELIGIBILITY_AGENT",
+            event       = "EHR_FETCH_COMPLETED",
+            status      = "SUCCESS",
+            message     = f"EHR and policy data loaded for {payer_name}",
+            duration_ms = int((time.time() - ehr_start) * 1000)
+        )
+    except Exception as e:
+        log_event(
+            case_id    = case_id,
+            agent_name = "ELIGIBILITY_AGENT",
+            event      = "EHR_FETCH_FAILED",
+            status     = "FAILED",
+            message    = str(e)
+        )
+        logger.error(f"[eligibility_agent] EHR Fetch failed: {e}")
+        print(f"[eligibility_agent] EHR Fetch failed: {e}")
 
         # ── 1.1 FORMAT UPLOADED EVIDENCE ─────────
         uploaded_evidence = ""

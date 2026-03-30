@@ -5,7 +5,7 @@ from typing import List
 # First entry is primary model, later entries are fallbacks.
 TASK_MODEL_FALLBACKS: dict[str, list[str]] = {
     "orchestrator_supervisor": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
-    "eligibility": ["gemini-2.5-pro", "gemini-2.5-flash"],
+    "eligibility": ["gemini-2.5-flash"],
     "gap_analysis": ["gemini-2.5-flash"],
     "summarization": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
     "pa_document": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
