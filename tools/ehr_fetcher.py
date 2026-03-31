@@ -1,14 +1,28 @@
-"""EHR fetcher utilities.
+"""
+EHR Fetcher Tool — Data Integration
+===================================
 
-This module provides helpers to fetch EHR-related data from the local database.
+This module provides the core data fetching logic for the 'IntelliAgents' 
+platform. It connects the Case data (stored in our SQL database) with 
+the Patient EHR data, creating a unified view for the AI agents.
+
+Key Features:
+-------------
+1. **Reconciliation**: Automatically merges data from multiple sources 
+   (Database, User Uploads, and Manual Fields) into a single JSON context.
+2. **Patient Evidence Handling**: Manages the extraction of raw clinical 
+   text from uploaded PDFs to provide 'real-world' evidence for the PA request.
+3. **Smart Clinical Mapping**: Automatically maps various human-entered gap 
+   names (e.g., 'echo') to the technical keys (e.g., 'lvef_percent') that 
+   the AI agents need for validation.
 """
 
 import os
 from typing import Any, Dict, Optional
 
 from langchain_core.tools import tool
-from crud.crud_extracted_data import get_extracted_data
-from db.session import SessionLocal
+from db import get_extracted_data
+from db import SessionLocal
 from schemas.extracted_data import ExtractedData as ExtractedDataSchema
 
 # Base directory for the backend
@@ -26,7 +40,7 @@ def fetch_extracted_data_by_case(case_id: str, extract_pdf_text: bool = True) ->
     """
 
     with SessionLocal() as db:
-        from crud.crud_case import get_case
+        from db import get_case
         from tools.pdf_extractor import extract_raw_text
         
         # 1. Get structured data from EHR

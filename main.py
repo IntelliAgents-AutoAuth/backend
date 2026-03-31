@@ -1,63 +1,58 @@
-from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
+"""
+IntelliAgents Backend — FastAPI Entry Point
+===========================================
+
+This is the main initialization file for the IntelliAgents backend. It sets up 
+the core infrastructure required for the AI agents to operate, including 
+database connections, observability, and administrative interfaces.
+
+Key Components:
+---------------
+1. **Bootstrapping**: Handles critical Windows-specific environment settings 
+   (Phoenix working directory) and observability setup.
+2. **Database Management**: Automatically runs migrations and ensures that the 
+   SQL schema is up-to-date.
+3. **Mock Data Seeding**: Populates the database with initial patient/case 
+   data for immediate testing and demonstration.
+4. **API Routing**: Mounts the versioned API router (v1) which contains all 
+   business logic and orchestrator endpoints.
+5. **Admin Dashboard**: Configures 'SQLAdmin', a web-based interface for 
+   mentors/staff to view raw database records (Users, Cases, EHRs).
+"""
+
 import os
 
-# ─────────────────────────────────────────
-# OBSERVABILITY (Arize Phoenix)
-# ─────────────────────────────────────────
-try:
-    import phoenix as px
-    from phoenix.otel import register
-    from openinference.instrumentation.langchain import LangChainInstrumentor
-    
-    # Launch Phoenix internally with resilience
-    PHOENIX_ENABLED = os.getenv("PHOENIX_ENABLED", "true").lower() == "true"
-    
-    if PHOENIX_ENABLED:
-        try:
-            if not px.active_session():
-                session = px.launch_app()
-                print(f"[observability] Phoenix dashboard launched: {session.url}")
-            else:
-                print(f"[observability] Phoenix dashboard already active.")
-            
-            # Use the phoenix.otel.register() helper to set up tracing
-            tracer_provider = register()
-            
-            # Instrument LangChain with the registered provider
-            LangChainInstrumentor().instrument(tracer_provider=tracer_provider, skip_dep_check=True)
-            print("[observability] LangChain instrumentation (via OTEL register) active globally.")
-        except Exception as px_e:
-            print(f"[observability] Phoenix app/otel failed to start (app will still run): {px_e}")
-    else:
-        print("[observability] Phoenix is disabled via environment variable.")
-        
-except ImportError:
-    print("[observability] Phoenix or dependencies not installed, skipping.")
-except Exception as e:
-    print(f"[observability] Failed to initialize observability: {e}")
+# CRITICAL: Set PHOENIX_WORKING_DIR before any other imports to fix Windows PermissionErrors
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+px_data_dir = os.path.join(backend_dir, "data", "phoenix")
+os.makedirs(px_data_dir, exist_ok=True)
+os.environ["PHOENIX_WORKING_DIR"] = px_data_dir
 
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
+# 1. Observability (Tracing & Logging)
+from utils.logger import setup_observability
+setup_observability()
+
+# 2. Database Schema & Migration Management
 from api.v1.api import api_router
 from core.config import settings
-from db.base import Base
-from db.session import engine
+from db import Base, engine
 from sqladmin import Admin, ModelView
 from models.user import User
 from models.ehr_records import EHR
 from models.cases import Case
 
-# Run migrations to update existing tables
-from scripts.migrate_db import migrate
+# Ensure existing tables are updated to the latest schema
+from scripts import migrate
 migrate()
 
-# Create tables (for new installations)
+# Create any missing tables (e.g., on first run)
 Base.metadata.create_all(bind=engine)
 
-# Initialize DB with mock data
-from scripts.seeder import seed_db
-from db.session import SessionLocal
-with SessionLocal() as db:
-    seed_db(db)
+# Seed the database with high-quality mock data for the demo
+from scripts import seed_db
+seed_db()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

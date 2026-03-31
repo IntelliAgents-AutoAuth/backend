@@ -1,23 +1,39 @@
 """
-CaseOrchestrator — State Machine + Memory
-==========================================
+CaseOrchestrator — Intelligent State Machine & Agent Coordination
+==================================================================
 
-Architecture
-------------
-  run(trigger)
-    → memory.load()              # recall what agents have already been called
-    → current_step = _resolve_next_step(trigger, db_status)
-    → while current_step:
-          # skip if already ran successfully
-          if memory.succeeded(current_step): ...
-          result = await _execute_step(current_step, memory)
-          memory.record(current_step, inputs, result)
-          db_status = db_case.status   (updated by agent)
-          current_step = _resolve_next_step(result["event"], db_status)
-    → memory.save()
+The CaseOrchestrator is the central "brain" of the IntelliAgents platform. It manages
+the end-to-end lifecycle of a Prior Authorization (PA) case using a combination of
+deterministic logic and an LLM-based Supervisor.
 
-Agents never call each other and never decide what comes next.
-The orchestrator owns all routing logic via an LLM Supervisor.
+Key Features:
+-------------
+1. **Dynamic Routing**: Uses an LLM Supervisor to decide the next logical step 
+   based on the current case status, historical actions, and new triggers.
+2. **State Persistence**: Integrates with OrchestratorMemory to ensure that 
+   successful steps are never redundantly re-run, saving both time and LLM costs.
+3. **Trigger-Based Execution**: Responds to external events (e.g., file uploads, 
+   staff approvals, sync requests) to move a case through its lifecycle.
+4. **Resilience**: Features built-in retry logic that resumes from the last 
+   failed step while maintaining full context.
+
+Flow Architecture:
+------------------
+    run(trigger)
+      → memory.load()              # Recall previous agent activity
+      → _resolve_next_step_llm()   # AI decides where to go next
+      → while current_step:
+            # Check if we can skip this step (optimization)
+            if memory.succeeded(current_step) and not rerun_needed: 
+                continue
+                
+            # Execute the core logic for this step
+            result = await _execute_step(current_step)
+            
+            # Record result and transition to next step
+            memory.record(current_step, result)
+            current_step = _resolve_next_step(result["event"], db_status)
+      → memory.save()              # Commit state to database
 """
 
 import os
@@ -31,20 +47,23 @@ from functools import partial
 from sqlalchemy.orm import Session
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-import db.base  # noqa: F401
-from db.session import SessionLocal
-from constants.cases import CaseStatus
-from crud import crud_case
-from services.extraction_service import fill_extracted_data_from_ehr
-from agents.gap_analysis_agent import run_gap_analysis
-from agents.eligibility_agent import run_eligibility_check
-from agents.pa_document_agent import generate_pa_content
-from services.pdf_generator import generate_pa_pdf
-from services.summarization_service import summarize_case_documents
-from utils.agent_logger import log_event
+from db import SessionLocal, get_case
+from services import (
+    fill_extracted_data_from_ehr,
+    generate_pa_pdf,
+    summarize_case_documents
+)
+from agents import (
+    run_gap_analysis,
+    run_gap_analysis_delta,
+    run_eligibility_check,
+    generate_pa_content
+)
+from utils.logger import log_event
 from utils.llm_util import get_keys, get_model_order
 from orchestrator.memory import OrchestratorMemory
-from prompts.orchestrator_prompts import ORCHESTRATOR_SYSTEM_PROMPT, CONTEXT_TEMPLATE
+from constants import CaseStatus
+from prompts import ORCHESTRATOR_SYSTEM_PROMPT, CONTEXT_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +104,17 @@ STEP_REGISTRY = {
 
 class CaseOrchestrator:
     """
-    Orchestrator for AutoAuth.
+    The CaseOrchestrator class manages the Prior Authorization workflow.
 
-    Controls the full PA lifecycle via a state machine.
-    Uses OrchestratorMemory to track which agents have already been called
-    and what results they returned — so it never re-runs a completed step
-    and can pass prior outputs downstream without re-fetching from DB.
+    It acts as a state machine controller, using 'OrchestratorMemory' to track
+    the execution history of various agents (EHR Fetch, Gap Analysis, Eligibility, etc.).
+    This ensures that the system is both efficient (no redundant work) and 
+    context-aware (downstream agents receive results from upstream ones).
+
+    Attributes:
+        case_id (str): The unique identifier for the medical case being processed.
+        memory (OrchestratorMemory): The persistent history of agent calls for this case.
+        _max_steps (int): Safety limit to prevent infinite loops in the state machine.
     """
 
     def __init__(self, case_id: str):
@@ -121,14 +145,17 @@ class CaseOrchestrator:
 
     async def run(self, trigger: str, payload: dict = None):
         """
-        Single entry point for all external triggers:
-          - "CASE_CREATED"
-          - "DOCUMENTS_UPLOADED"
-                    - "ELIGIBILITY_REQUESTED"
-          - "STAFF_APPROVED"
-                    - "SYNC_REQUESTED"
-                    - "GENERATE_PACKET_REQUESTED"
-          - "RETRY"
+        The main entrance for all case processing activities.
+
+        This method is triggered by external events such as:
+          - "CASE_CREATED": Initial setup and EHR data retrieval.
+          - "DOCUMENTS_UPLOADED": New clinical evidence added by the user.
+          - "ELIGIBILITY_REQUESTED": Manual start of the AI clinical check.
+          - "STAFF_APPROVED": A human reviewer has confirmed the PA packet.
+          - "RETRY": Manual or automatic attempt to fix a failed step.
+
+        It manages concurrency using an asynchronous lock per case_id to 
+        prevent duplicate processing runs.
         """
         payload = payload or {}
         db = self._get_db()
@@ -143,7 +170,7 @@ class CaseOrchestrator:
         await case_lock.acquire()
 
         try:
-            db_case = crud_case.get_case(db, case_id=self.case_id)
+            db_case = get_case(db, case_id=self.case_id)
             if not db_case:
                 logger.error(f"[orchestrator] Case {self.case_id} not found.")
                 return
@@ -300,7 +327,7 @@ class CaseOrchestrator:
         except Exception as e:
             logger.exception(f"[orchestrator] Unhandled error: {e}")
             try:
-                db_case = crud_case.get_case(db, case_id=self.case_id)
+                db_case = get_case(db, case_id=self.case_id)
                 if db_case:
                     db_case.status = CaseStatus.FAILED.value
                     db.add(db_case)
@@ -320,8 +347,18 @@ class CaseOrchestrator:
         self, db: Session, db_case, last_event: str, payload: dict
     ) -> dict:
         """
-        Calls the Supervisor LLM to decide the next step.
-        Returns {"thinking": str, "next_step": str | None}
+        Consults the Supervisor LLM to intelligently determine the next step.
+
+        Unlike a hardcoded state machine, this 'AI Supervisor' evaluates:
+        1. The global Step Registry (what is possible).
+        2. The Case History (what has already happened).
+        3. The current Patient Context (EHR status, file uploads).
+
+        This allows for complex branching logic, such as jumping back to 
+        Gap Analysis if a newly uploaded document might clear a previous gap.
+
+        Returns:
+            dict: Contains "thinking" (the reasoning) and "next_step" (the selected action).
         """
         try:
             # Model order is centrally managed in utils.llm_util
@@ -550,7 +587,7 @@ class CaseOrchestrator:
         - First run: Full LLM analysis (expensive)
         - Re-runs on file upload: Use lightweight delta version (fast)
         """
-        from agents.gap_analysis_agent import run_gap_analysis_delta
+        # Removed broken inline import: from agents.gap_analysis_agent import run_gap_analysis_delta
         
         db_case.status = CaseStatus.GAP_ANALYSIS_RUNNING.value
         db.add(db_case)

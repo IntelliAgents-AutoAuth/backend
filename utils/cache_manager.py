@@ -92,14 +92,76 @@ class CacheManager:
     def clear_all(self):
         """Clear all RAM and Disk cache."""
         self._memory_cache.clear()
-        for f in os.listdir(self.cache_dir):
-            try:
-                os.remove(os.path.join(self.cache_dir, f))
-            except Exception:
-                pass
+        if os.path.exists(self.cache_dir):
+            for f in os.listdir(self.cache_dir):
+                try:
+                    os.remove(os.path.join(self.cache_dir, f))
+                except Exception:
+                    pass
+
+    # ─────────────────────────────────────────
+    # CASE-SPECIFIC HELPERS (Namespacing)
+    # ─────────────────────────────────────────
+
+    def get_by_case(self, case_id: str, key: str, ttl: Optional[int] = None) -> Optional[Any]:
+        """Namespaced get for a specific case."""
+        return self.get(f"{case_id}:{key}", ttl=ttl)
+
+    def set_by_case(self, case_id: str, key: str, data: Any):
+        """Namespaced set for a specific case."""
+        self.set(f"{case_id}:{key}", data)
+
+    def delete_by_case(self, case_id: str, key: str):
+        """Namespaced delete for a specific case."""
+        self.delete(f"{case_id}:{key}")
 
 # Singleton instances for common needs
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 pdf_cache = CacheManager(os.path.join(backend_dir, ".cache", "pdf_texts"))
 policy_cache = CacheManager(os.path.join(backend_dir, ".cache", "policies"))
 general_cache = CacheManager(os.path.join(backend_dir, ".cache", "general"))
+
+class PolicyRulesCache:
+    """
+    Specialized cache for the consolidated extracted_policy_rules.json file.
+    This file stores structured rules for all ingested policies.
+    """
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+
+    def load(self) -> list[dict]:
+        """Load all rules from the JSON file."""
+        if os.path.exists(self.file_path):
+            try:
+                with open(self.file_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load policy rules from {self.file_path}: {e}")
+        return []
+
+    def save(self, rules: list[dict]):
+        """Save all rules to the JSON file."""
+        try:
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump(rules, f, indent=4)
+        except Exception as e:
+            logger.error(f"Failed to save policy rules to {self.file_path}: {e}")
+
+    def update_rule(self, filename: str, result: dict):
+        """Update or add a single rule entry by filename."""
+        rules = self.load()
+        existing_index = -1
+        for i, r in enumerate(rules):
+            if r.get("file") == filename:
+                existing_index = i
+                break
+        
+        if existing_index >= 0:
+            rules[existing_index] = result
+        else:
+            rules.append(result)
+        
+        self.save(rules)
+
+rules_cache = PolicyRulesCache(os.path.join(backend_dir, "policy-pdfs", "extracted_policy_rules.json"))

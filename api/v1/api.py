@@ -1,3 +1,19 @@
+"""
+API Router (v1) — Central Dispatcher
+====================================
+
+This file serves as the main entry point for all version 1 (v1) API routes. 
+It aggregates multiple specialized routers (Auth, Cases, Payer, Test) into 
+a single 'api_router' that is then mounted by the main FastAPI application.
+
+Structure:
+----------
+- /auth: Authentication and user management.
+- /cases: Core Prior Authorization logic, case management, and agents.
+- /payer: Simulation of insurance payer endpoints and submissions.
+- /test: Debugging and diagnostic routes (for development only).
+"""
+
 from fastapi import APIRouter
 from api.v1.endpoints.auth import router as auth_router
 from api.v1.endpoints.cases import router as cases_router

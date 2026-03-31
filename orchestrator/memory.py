@@ -1,27 +1,29 @@
 """
-OrchestratorMemory
-==================
-Tracks every agent call made by the orchestrator for a given case:
-  - Which step/agent was called
-  - What inputs were sent
-  - What result came back
-  - Whether it succeeded or failed
-  - When it happened
+OrchestratorMemory — Hybrid Persistence & State Management
+==========================================================
 
-Stored in the existing `cases.audit_log` JSON column — no schema migration needed.
+The OrchestratorMemory class provides a specialized persistence layer for the 
+CaseOrchestrator. It ensures that every action taken by an AI agent is 
+recorded, searchable, and reusable by downstream agents.
 
-Usage in orchestrator:
-    memory = OrchestratorMemory(case_id)
-    memory.load(db)                          # load prior history from DB
+Architecture:
+-------------
+1. **L1 Cache (RAM)**: Uses 'general_cache' (shared memory) for sub-millisecond 
+   access to recent case history within the current process.
+2. **L2 Cache (Database)**: Persists the structured history into the 
+   `cases.audit_log` JSON column in the SQL database.
+3. **LangChain Integration**: Inherits from 'BaseChatMessageHistory', allowing 
+   the orchestrator memory to be dropped directly into LangChain workflows.
 
-    # Before calling an agent:
-    if memory.already_ran("gap_analysis"):
-        result = memory.get_last_result("gap_analysis")
-    else:
-        result = await run_gap_analysis(inputs)
-        memory.record("gap_analysis", inputs, result, "SUCCESS")
-
-    memory.save(db)                          # persist back to DB
+Key Benefits:
+-------------
+- **No Redundancy**: The `already_ran()` and `succeeded()` checks prevent 
+  paying for the same LLM call twice.
+- **Context Passing**: Upstream results (e.g., Gap Analysis JSON) are stored 
+  and passed directly to downstream agents (e.g., Eligibility) without 
+  expensive re-computation.
+- **Auditability**: Every step, its inputs, raw LLM outputs, and final 
+  verdicts are logged for human review and debugging.
 """
 
 import logging
@@ -30,7 +32,7 @@ from typing import Any
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
-from crud import crud_case
+from db import get_case
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +44,11 @@ from utils.cache_manager import general_cache
 
 class OrchestratorMemory(BaseChatMessageHistory):
     """
-    Hybrid RAM/DB memory for Orchestration.
+    Manages the 'Short-term' and 'Long-term' memory for a specific case.
 
-    Inherits from LangChain's BaseChatMessageHistory to allow use within
-    LangChain chains, while maintaining our structured audit_log in SQL.
-
-    L1: RAM (Process-level dictionary via general_cache)
-    L2: DB (cases.audit_log column)
+    This class bridges the gap between fast in-memory execution and permanent 
+    database storage. It is designed to be 'Schema-less' by using a JSONB-style 
+    audit log, making it highly flexible as new agents or steps are added.
     """
 
     def __init__(self, case_id: str):
@@ -121,8 +121,8 @@ class OrchestratorMemory(BaseChatMessageHistory):
     def clear(self) -> None:
         """Clear both L1 RAM and prepare for L2 purge."""
         self._log = []
-        general_cache.delete(f"memory:{self.case_id}")
-        general_cache.delete(f"data:{self.case_id}")
+        general_cache.delete_by_case(self.case_id, "memory")
+        general_cache.delete_by_case(self.case_id, "data")
         logger.info(f"[memory] Cleared memory for case {self.case_id}")
 
     # ─────────────────────────────────────────
@@ -131,13 +131,13 @@ class OrchestratorMemory(BaseChatMessageHistory):
 
     def set_cached_data(self, key: str, value: Any) -> None:
         """Store arbitrary data in L1 cache (e.g., EHR data for multi-agent access)."""
-        # Store using a namespaced key in general_cache
-        general_cache.set(f"data:{self.case_id}:{key}", value)
+        # Store using the centralized namespaced helper
+        general_cache.set_by_case(self.case_id, f"data:{key}", value)
         logger.info(f"[memory] Cached data for key='{key}' in case {self.case_id}")
 
     def get_cached_data(self, key: str) -> Any | None:
         """Retrieve cached data (e.g., EHR data) from L1 cache."""
-        value = general_cache.get(f"data:{self.case_id}:{key}")
+        value = general_cache.get_by_case(self.case_id, f"data:{key}")
         if value is not None:
             logger.info(f"[memory] Cache HIT for key='{key}' in case {self.case_id}")
         else:
@@ -149,36 +149,51 @@ class OrchestratorMemory(BaseChatMessageHistory):
     # ─────────────────────────────────────────
 
     def load(self, db) -> None:
-        """Load history: RAM Cache first (L1), then DB Fallback (L2)."""
-        # 1. Try RAM Cache (L1) via general_cache
-        cached_log = general_cache.get(f"memory:{self.case_id}")
+        """
+        Loads the case history from the most efficient source available.
+
+        Priority:
+        1. **L1 RAM**: If the case was recently processed in this process, 
+           load from the shared memory cache (fastest).
+        2. **L2 DB**: If not in RAM, fetch the 'audit_log' from the database 
+           and hydrate the RAM cache for subsequent calls.
+        """
+        # 1. Try RAM Cache (L1) via centralized namespacing
+        cached_log = general_cache.get_by_case(self.case_id, "memory")
         if cached_log is not None:
             self._log = cached_log
             logger.info(f"[memory] L1 CACHE HIT: Loaded {len(self._log)} entries for {self.case_id}")
             return
 
         # 2. Try DB (L2)
-        db_case = crud_case.get_case(db, case_id=self.case_id)
+        db_case = get_case(db, case_id=self.case_id)
         if db_case and db_case.audit_log:
             self._log = list(db_case.audit_log)
         else:
             self._log = []
 
         # Update RAM Cache for next time
-        general_cache.set(f"memory:{self.case_id}", self._log)
+        general_cache.set_by_case(self.case_id, "memory", self._log)
         logger.info(
             f"[memory] L1 CACHE MISS (L2 Loaded): {len(self._log)} entries for {self.case_id}"
         )
 
     def save(self, db) -> None:
-        """Save history: Sync L1 RAM and flush to L2 DB."""
-        # Update L1 RAM
-        general_cache.set(f"memory:{self.case_id}", self._log)
+        """
+        Synchronizes the in-memory state with the permanent database.
+
+        Safety Logic:
+        It performs a 'Smart Merge' with the existing database audit log. 
+        This prevents the orchestrator from overwriting logs generated by 
+        other system events (like manual status changes or background tasks).
+        """
+        # Update L1 RAM via centralized namespacing
+        general_cache.set_by_case(self.case_id, "memory", self._log)
 
         # Update L2 DB
         # IMPORTANT: Merge with existing audit_log instead of replacing it
         # This preserves event-based logs from agent_logger while adding orchestrator steps
-        db_case = crud_case.get_case(db, case_id=self.case_id)
+        db_case = get_case(db, case_id=self.case_id)
         if db_case:
             # Get existing audit log (contains event-based entries from agent_logger)
             existing_audit_log = db_case.audit_log or []
@@ -232,8 +247,8 @@ class OrchestratorMemory(BaseChatMessageHistory):
         }
         self._log.append(entry)
         
-        # Immediate L1 Cache update
-        general_cache.set(f"memory:{self.case_id}", self._log)
+        # Immediate L1 Cache update via centralized namespacing
+        general_cache.set_by_case(self.case_id, "memory", self._log)
         
         logger.info(f"[memory] Recorded step '{step}' → {status}")
 

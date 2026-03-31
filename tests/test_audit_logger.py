@@ -6,7 +6,7 @@ import json
 # Add backend to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.agent_logger import log_event
+from utils.logger import log_event
 from db.session import SessionLocal
 from crud import crud_case
 
@@ -27,7 +27,7 @@ async def test_logger():
             case_id=case_id,
             patient_id="PAT-001",
             status="DRAFT",
-            created_by="test@example.com",
+            created_by="admin@example.com",
             audit_log=[]
         )
         db.add(db_case)

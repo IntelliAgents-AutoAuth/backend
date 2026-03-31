@@ -12,7 +12,7 @@ if backend_dir not in sys.path:
 from db.session import SessionLocal
 import models.user  # Fix ForeignKey error
 import models.ehr_records
-from constants.cases import CaseStatus
+from constants import CaseStatus
 from schemas.cases import CaseCreate
 from crud import crud_case
 from orchestrator.case_orchestrator import CaseOrchestrator

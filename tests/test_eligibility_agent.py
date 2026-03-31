@@ -96,7 +96,7 @@ def test_run_eligibility_check():
         print("❌ GOOGLE_API_KEY not found in .env — skipping LLM test.")
         return
 
-    from agents.eligibility_agent import run_eligibility_check
+    from agents import run_eligibility_check
 
     case_id = "PA-20260309-00002"
     print(f"Running eligibility check for case: {case_id}")

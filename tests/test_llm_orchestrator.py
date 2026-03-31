@@ -26,7 +26,7 @@ sys.modules['constants.cases'] = mock_constants
 sys.path.append(os.getcwd())
 
 from orchestrator.case_orchestrator import CaseOrchestrator
-from constants.cases import CaseStatus
+from constants import CaseStatus
 
 async def test_llm_orchestrator_decision():
     """Test that the orchestrator calls the LLM and follows its decision."""

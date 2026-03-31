@@ -1,0 +1,9 @@
+{
+    "case_id": "PA-20260331-00022",
+    "patient_name": "John Smith",
+    "cpt_code": "75563",
+    "diagnosis": "Dilated Cardiomyopathy",
+    "submission_time": "2026-03-31T19:08:35.823523",
+    "status": "PENDING_REVIEW",
+    "pdf_file": "PA_PA-20260331-00022_20260331_190835.pdf"
+}

@@ -8,7 +8,7 @@ if backend_dir not in sys.path:
 
 from tools.ehr_fetcher import fetch_extracted_data_by_case
 from tools.pdf_extractor import extract_raw_text
-from agents.gap_analysis_agent import run_gap_analysis
+from agents import run_gap_analysis
 
 def test_ehr_fetcher():
     print("\n--- Testing ehr_fetcher ---")

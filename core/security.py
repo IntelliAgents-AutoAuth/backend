@@ -9,7 +9,7 @@ import hmac
 from sqlalchemy.orm import Session
 from api.deps import get_db
 from models.user import User
-from constants.roles import UserRole
+from constants import UserRole
 
 # Import the logger functions from utils.logger
 from utils.logger import (

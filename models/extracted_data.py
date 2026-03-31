@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, Float, Boolean, Text, DateTime, JSON, ForeignKey, Date, Integer
 from datetime import datetime, timezone
-from db.base_class import Base
+from db.base import Base
 
 class ExtractedData(Base):
     __tablename__ = "extracted_data"

@@ -1,4 +1,4 @@
-from constants.roles import UserRole
+from constants import UserRole
 
 MOCK_USERS = {
     "pa_coordinator_1": {

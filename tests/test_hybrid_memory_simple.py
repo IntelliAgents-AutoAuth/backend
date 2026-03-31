@@ -2,28 +2,31 @@ import asyncio
 import logging
 import sys
 import os
+import pytest
 
 # Add backend to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from orchestrator.memory import OrchestratorMemory, _MEMORY_CACHE
+from orchestrator.memory import OrchestratorMemory
+from utils.cache_manager import general_cache
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 
+@pytest.mark.asyncio
 async def test_simple_cache():
     case_id = "TEST-HYBRID-001"
     
     # 1. Start with clean cache
-    if case_id in _MEMORY_CACHE:
-        del _MEMORY_CACHE[case_id]
+    general_cache.delete_by_case(case_id, "memory")
         
     print("\n--- [Simple Test] Step 1: Record in RAM ---")
     mem = OrchestratorMemory(case_id)
     mem.record("test_step_1", {"foo": "bar"}, {"status": "ok"})
     
-    assert case_id in _MEMORY_CACHE, "Case should be in L1 Cache after record()"
-    assert len(_MEMORY_CACHE[case_id]) == 1
+    cached_val = general_cache.get_by_case(case_id, "memory")
+    assert cached_val is not None, "Case should be in L1 Cache after record()"
+    assert len(cached_val) == 1
     
     print("\n--- [Simple Test] Step 2: L1 Cache Hit ---")
     # Fresh instance, but same case_id

@@ -15,12 +15,11 @@ from models.cases import Case
 from models.user import User
 from core.security import get_current_user
 from api.deps import get_db
-from crud import crud_case, crud_ehr
-from crud.crud_extracted_data import get_extracted_data
+from db import SessionLocal, get_case, get_ehr, get_extracted_data, create_case, get_cases
 from orchestrator.case_orchestrator import CaseOrchestrator
-from constants.cases import CaseStatus
+from constants import CaseStatus
 from tools.ehr_fetcher import fetch_extracted_data_by_case
-from services.async_file_processor import AsyncFileExtractor
+from services import AsyncFileExtractor, extract_files_batch
 
 
 logger = logging.getLogger(__name__)
@@ -99,7 +98,7 @@ async def create_new_case(
     db: Session = Depends(get_db),
 ):
     """Create a new case with automatic ID and draft status."""
-    db_case = crud_case.create_case(db, case_in=case_in, created_by=current_user.email)
+    db_case = create_case(db, case_in=case_in, created_by=current_user.email)
 
     # Trigger Orchestrator in Background (single runtime owner)
     _schedule_orchestrator(background_tasks, db_case, trigger="CASE_CREATED", payload={"pdf_path": None})
@@ -114,7 +113,7 @@ async def list_cases(
 ):
     """Return all cases."""
     # Note: Depending on requirements, we might filter by created_by here
-    return crud_case.get_cases(db)
+    return get_cases(db)
 
 
 @router.get("/{case_id}", response_model=CaseSchema)
@@ -124,7 +123,7 @@ async def get_case_details(
     current_user: User = Depends(get_current_user),
 ):
     """Fetch details of a specific case."""
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -146,7 +145,7 @@ async def get_case_full_details(
     - Patient EHR record
     """
     # 1. Get Case
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -157,7 +156,7 @@ async def get_case_full_details(
     db_extracted = get_extracted_data(db, case_id=case_id)
     
     # 3. Get EHR Record
-    db_ehr = crud_ehr.get_ehr(db, patient_id=db_case.patient_id)
+    db_ehr = get_ehr(db, patient_id=db_case.patient_id)
     
     return {
         "case": merge_ehr_data_into_case(db, db_case),
@@ -173,7 +172,7 @@ async def get_case_gap_analysis(
     current_user: User = Depends(get_current_user),
 ):
     """Retrieve the stored Gap Analysis result for a case."""
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -195,7 +194,7 @@ async def get_case_timeline(
     current_user: User = Depends(get_current_user)
 ):
     """Returns full audit log timeline for a case."""
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
 
@@ -212,7 +211,7 @@ async def get_case_audit_log(
     current_user: User = Depends(get_current_user)
 ):
     """Retrieve the audit log for a case."""
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
     
@@ -268,7 +267,7 @@ async def upload_case_file(
     Real file upload endpoint that saves to uploads/{case_id}/.
     OPTIMIZATION 5: Batch DB Operations - Single transaction for all updates
     """
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
     
@@ -358,7 +357,7 @@ async def bulk_upload_case_documents(
     current_user: User = Depends(get_current_user),
 ):
     """Bulk document upload to prevent race conditions."""
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
     
@@ -414,7 +413,7 @@ async def bulk_upload_parallel(
     
     Expected speedup: 80% faster for 5+ files (15s → 3s)
     """
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
     
@@ -524,7 +523,7 @@ async def sync_case_ehr(
     current_user: User = Depends(get_current_user),
 ):
     """Manually trigger orchestrator sync flow for a specific case."""
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -556,7 +555,7 @@ async def check_case_eligibility(
             "reason": str
         }
     """
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -584,7 +583,7 @@ async def preview_pa_package(
     """
     Finds and serves the latest generated PA PDF for a case.
     """
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
         
@@ -621,7 +620,7 @@ async def submit_case_to_payer(
     """
     Triggers the final submission flow (Staff Approval -> Submitted -> Tracking).
     """
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
         
@@ -654,7 +653,7 @@ async def generate_pa_document(
 
     Use /preview to fetch the latest generated package when ready.
     """
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -673,7 +672,7 @@ async def retry_case_flow(
     current_user: User = Depends(get_current_user),
 ):
     """Retry last failed orchestrator step for a case."""
-    db_case = crud_case.get_case(db, case_id=case_id)
+    db_case = get_case(db, case_id=case_id)
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
 

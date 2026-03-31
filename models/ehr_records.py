@@ -1,6 +1,30 @@
+"""
+EHR Data Model — Patient Medical Records
+========================================
+
+The EHR (Electronic Health Record) model represents the 'Source of Truth' 
+for patient data in the IntelliAgents platform. This model stores 
+structured clinical data, demographics, and insurance information 
+retrieved from simulated healthcare systems.
+
+AI Usage:
+---------
+The 'Eligibility' and 'Gap Analysis' agents read from this model to 
+understand the patient's medical history, current diagnoses (ICD-10), 
+and planned procedures (CPT).
+
+Key Groups:
+-----------
+- **Demographics**: Basic patient identity (Name, DOB, Gender).
+- **Insurance**: Payer details required for routing and policy retrieval.
+- **Clinical**: The medical reason for the request (Diagnosis, Procedure).
+- **Physician**: Information about the requesting provider and facility.
+- **Lab Results**: Complex JSON data representing recent diagnostic tests.
+"""
+
 from sqlalchemy import Column, String, Text, DateTime, JSON
 from datetime import datetime, timezone
-from db.base_class import Base
+from db.base import Base
 
 class EHR(Base):
     __tablename__ = "ehr_records"

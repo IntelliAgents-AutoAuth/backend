@@ -97,7 +97,7 @@ def test_full_pa_generation():
         print("[SKIP] GOOGLE_API_KEY not set -- skipping full LLM test.")
         return
 
-    from agents.pa_document_agent import generate_pa_content
+    from agents import generate_pa_content
     from services.pdf_generator import generate_pa_pdf
 
     case_id = "PA-20260309-00002"

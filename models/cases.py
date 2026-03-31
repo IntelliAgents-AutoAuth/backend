@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Integer, Float
 from datetime import datetime, timezone
-from db.base_class import Base
-from constants.cases import CaseStatus
+from db.base import Base
+from constants import CaseStatus
 
 class Case(Base):
     __tablename__ = "cases"
