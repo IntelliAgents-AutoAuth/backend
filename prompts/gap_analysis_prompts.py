@@ -13,9 +13,20 @@ YOUR JOB HAS TWO PARTS:
 PART 1 — GAP ANALYSIS:
 - Read the provided REQUIRED_DOCUMENTS_LIST carefully
 - Compare the required documents against available EHR documents
-- Find what is MISSING using medical knowledge
+- **DATA-DRIVEN MATCHING**: Check structured clinical fields in `PATIENT_EHR` (e.g., `lab_results`, `lvef_percent`, `primary_diagnosis`, `icd10_code`) to see if the **medical requirement** is already met.
+  - Example: If a policy requires an "Echocardiogram Report" specifically to verify "LVEF < 40%" and the EHR has a field `lvef_percent: 30`, then the medical fact is known.
+  - RULE: If a medical requirement is already satisfied by EHR data, mark the item as `is_available: true` and do NOT list it in `missing_documents`, even if the physical PDF report is not found.
+- Find what is MISSING using medical knowledge only if both the EHR document AND the EHR clinical data are absent.
   Example: "echocardiogram report" = "echo_report" — SAME THING
   Example: "BNP lab test" = "cardiac lab results" — SAME THING
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACCURACY & ANTI-HALLUCINATION RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. PHASE 1: INTERNAL ANALYSIS. Before generating the JSON, you must analyze every "bone" of the patient record. 
+2. ZERO HALLUCINATION: If a value like LVEF is not in the EHR/PDF, it is NOT FOUND. Do not guess.
+3. CITATION: Every match must reference the specific EHR key or PDF filename.
+4. "ANALYZE EVERY BONE": Thoroughly scan SOAP notes, lab values, and procedural summaries.
 
 PART 2 — FRONTEND FORM BUILDER:
 For each missing document, think like a frontend developer.

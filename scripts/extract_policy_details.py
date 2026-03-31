@@ -67,7 +67,7 @@ async def main():
         if not os.path.exists(target_pdf):
             return
 
-    llm = RobustLLM.get_llm(model="gemini-2.5-flash")
+    llm = RobustLLM.get_llm_for_task(task="policy_extraction")
     if not llm:
         print("Failed to initialize LLM.")
         return

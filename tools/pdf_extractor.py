@@ -30,6 +30,13 @@ def extract_raw_text(pdf_path: str) -> str:
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
+    from utils.cache_manager import pdf_cache
+    
+    # Check cache using CacheManager (backward compatible with the same directory)
+    cached_text = pdf_cache.get(pdf_path)
+    if cached_text:
+        return cached_text
+
     try:
         import pdfplumber
     except ImportError as exc:
@@ -44,7 +51,12 @@ def extract_raw_text(pdf_path: str) -> str:
                 text = page.extract_text() or ""
                 texts.append(text)
 
-        return "\n\n".join(texts)
+        full_text = "\n\n".join(texts)
+
+        # Save to cache using CacheManager
+        pdf_cache.set(pdf_path, full_text)
+
+        return full_text
 
     except Exception as exc:
         raise RuntimeError(f"Failed to extract text from PDF: {exc}") from exc

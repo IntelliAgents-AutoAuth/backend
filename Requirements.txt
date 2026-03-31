@@ -10,6 +10,8 @@ langchain
 langchain-community
 langchain-google-genai
 langchain-openai
+langchain-huggingface
+chromadb
 pdfplumber
 reportlab
 pypdf
@@ -17,3 +19,4 @@ python-dotenv
 openinference-instrumentation-langchain
 arize-phoenix
 pypdf
+sentence-transformers

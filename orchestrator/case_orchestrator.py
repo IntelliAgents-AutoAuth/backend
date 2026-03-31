@@ -22,10 +22,12 @@ The orchestrator owns all routing logic via an LLM Supervisor.
 
 import os
 import json
+import time
 import asyncio
 import traceback
 import logging
 from datetime import datetime, timezone
+from functools import partial
 from sqlalchemy.orm import Session
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -38,11 +40,16 @@ from agents.gap_analysis_agent import run_gap_analysis
 from agents.eligibility_agent import run_eligibility_check
 from agents.pa_document_agent import generate_pa_content
 from services.pdf_generator import generate_pa_pdf
+from services.summarization_service import summarize_case_documents
 from utils.agent_logger import log_event
+from utils.llm_util import get_keys, get_model_order
 from orchestrator.memory import OrchestratorMemory
-from orchestrator.orchestrator_prompts import ORCHESTRATOR_SYSTEM_PROMPT, CONTEXT_TEMPLATE
+from prompts.orchestrator_prompts import ORCHESTRATOR_SYSTEM_PROMPT, CONTEXT_TEMPLATE
 
 logger = logging.getLogger(__name__)
+
+# Process-local lock table to avoid concurrent duplicate runs for same case.
+_CASE_RUN_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -89,9 +96,24 @@ class CaseOrchestrator:
     def __init__(self, case_id: str):
         self.case_id = case_id
         self.memory = OrchestratorMemory(case_id)
+        self._max_steps = 10
 
     def _get_db(self):
         return SessionLocal()
+
+    def _should_rerun_step(self, step: str, trigger: str) -> bool:
+        """
+        Decide whether a previously successful step should be rerun for this trigger.
+        """
+        if trigger == "DOCUMENTS_UPLOADED" and step in {"gap_analysis", "eligibility"}:
+            return True
+        if trigger == "ELIGIBILITY_REQUESTED" and step == "eligibility":
+            return True
+        if trigger == "SYNC_REQUESTED" and step in {"ehr_fetch", "gap_analysis"}:
+            return True
+        if trigger == "GENERATE_PACKET_REQUESTED" and step == "packet_gen":
+            return True
+        return False
 
     # ─────────────────────────────────────────
     # PUBLIC ENTRY POINT
@@ -102,11 +124,23 @@ class CaseOrchestrator:
         Single entry point for all external triggers:
           - "CASE_CREATED"
           - "DOCUMENTS_UPLOADED"
+                    - "ELIGIBILITY_REQUESTED"
           - "STAFF_APPROVED"
+                    - "SYNC_REQUESTED"
+                    - "GENERATE_PACKET_REQUESTED"
           - "RETRY"
         """
         payload = payload or {}
         db = self._get_db()
+        case_lock = _CASE_RUN_LOCKS.setdefault(self.case_id, asyncio.Lock())
+
+        if case_lock.locked() and trigger != "RETRY":
+            logger.info(
+                f"[orchestrator] Ignoring trigger '{trigger}' for {self.case_id}: run already in progress."
+            )
+            return
+
+        await case_lock.acquire()
 
         try:
             db_case = crud_case.get_case(db, case_id=self.case_id)
@@ -116,38 +150,121 @@ class CaseOrchestrator:
 
             # Load prior agent call history for this case
             self.memory.load(db)
+            
+            log_event(
+                self.case_id,
+                "ORCHESTRATOR",
+                "ORCHESTRATOR_STARTED", 
+                "RUNNING",
+                f"Case processing started (trigger: {trigger})",
+                db_session=db
+            )
+            db.commit()
+            
             logger.info(
                 f"[orchestrator] Trigger='{trigger}' | "
                 f"Status={db_case.status} | "
                 f"Memory so far: {self.memory.summary()}"
             )
 
+            # OPTIMIZATION 7: EHR Cache in Memory - fetch once at start, pass to all agents
+            try:
+                from tools.ehr_fetcher import fetch_extracted_data_by_case
+                ehr_start = time.time()
+                ehr_data = fetch_extracted_data_by_case(self.case_id)
+                if ehr_data:
+                    self.memory.set_cached_data("ehr_data", ehr_data)
+                    ehr_elapsed = time.time() - ehr_start
+                    logger.info(
+                        f"[orchestrator] Pre-fetched and cached EHR data for {self.case_id} "
+                        f"({ehr_elapsed:.2f}s) — all agents will read from cache"
+                    )
+            except Exception as e:
+                logger.warning(f"[orchestrator] Failed to pre-fetch EHR data: {e}")
+
+            in_progress_statuses = {
+                CaseStatus.EHR_FETCHING.value,
+                CaseStatus.GAP_ANALYSIS_RUNNING.value,
+                CaseStatus.ELIGIBILITY_RUNNING.value,
+                CaseStatus.PACKET_GENERATING.value,
+            }
+            # Allow DOCUMENTS_UPLOADED to bypass in-progress check (enables re-analysis during eligibility)
+            if trigger != "RETRY" and trigger != "DOCUMENTS_UPLOADED" and db_case.status in in_progress_statuses:
+                logger.info(
+                    f"[orchestrator] Ignoring trigger '{trigger}' for {self.case_id}: "
+                    f"case is already in-progress with status={db_case.status}."
+                )
+                return
+
             if trigger == "RETRY":
                 await self._handle_retry(db, db_case, payload)
                 return
 
+            # Store trigger for use by steps (Optimization 4: Delta Analysis needs to know trigger)
+            self._current_trigger = trigger
+
             # AI Thinking & Step resolution
-            # Initial decision based on the trigger
-            decision = await self._resolve_next_step_llm(db, db_case, trigger, payload)
-            current_step = decision.get("next_step")
-            thinking = decision.get("thinking", "No explanation provided.")
+            # Optimization: For deterministic triggers, skip expensive LLM call
+            DETERMINISTIC_TRIGGERS = {
+                "CASE_CREATED",
+                "SYNC_REQUESTED",
+                "ELIGIBILITY_REQUESTED",
+                "GENERATE_PACKET_REQUESTED",
+            }
+            
+            # Special case: DOCUMENTS_UPLOADED during in-progress should use LLM (more intelligent)
+            # This prevents hardcoded routing from breaking in edge cases
+            use_llm_for_document_upload = (
+                trigger == "DOCUMENTS_UPLOADED" and 
+                db_case.status in {
+                    CaseStatus.ELIGIBILITY_RUNNING.value,
+                    CaseStatus.PACKET_GENERATING.value,
+                }
+            )
+            
+            if trigger in DETERMINISTIC_TRIGGERS and not use_llm_for_document_upload:
+                # Skip LLM Supervisor - we already know the next step for these triggers
+                logger.info(f"[orchestrator] Using deterministic path for trigger={trigger} (skipping LLM Supervisor)")
+                current_step = self._resolve_next_step(trigger, db_case.status)
+                thinking = f"Deterministic route (no LLM needed) for trigger={trigger}"
+            else:
+                # For ambiguous triggers OR document uploads during in-progress, use LLM to decide
+                if use_llm_for_document_upload:
+                    logger.info(f"[orchestrator] Using LLM Supervisor for DOCUMENTS_UPLOADED (case in-progress)")
+                else:
+                    logger.info(f"[orchestrator] Using LLM Supervisor for ambiguous trigger={trigger}")
+                decision = await self._resolve_next_step_llm(db, db_case, trigger, payload)
+                current_step = decision.get("next_step")
+                thinking = decision.get("thinking", "No explanation provided.")
 
             # State machine loop
+            executed_steps = 0
             while current_step:
+                executed_steps += 1
+                if executed_steps > self._max_steps:
+                    logger.error(
+                        f"[orchestrator] Safety stop for {self.case_id}: exceeded max steps ({self._max_steps})."
+                    )
+                    break
+
                 # Skip steps the orchestrator already successfully completed
-                if self.memory.succeeded(current_step):
+                if self.memory.succeeded(current_step) and not self._should_rerun_step(current_step, trigger):
                     logger.info(f"[orchestrator] Skipping '{current_step}' — already ran successfully.")
                     prior_result = self.memory.get_last_result(current_step)
                     event = prior_result.get("event", "") if prior_result else ""
                     db.refresh(db_case)
-                    
-                    decision = await self._resolve_next_step_llm(db, db_case, event, payload)
-                    current_step = decision.get("next_step")
-                    thinking = decision.get("thinking", "Skipped step, next step decided.")
+
+                    # Use deterministic transition after a successful prior step to avoid
+                    # repeated LLM supervisor calls for already-completed paths.
+                    current_step = self._resolve_next_step(event, db_case.status)
+                    thinking = "Skipped previously successful step; advanced using deterministic transition."
                     continue
 
                 logger.info(f"[orchestrator] Executing step: '{current_step}' | Thinking: {thinking}")
-                log_event(self.case_id, "ORCHESTRATOR", f"STEP_START_{current_step.upper()}", "RUNNING", f"LLM Decision: {thinking}")
+                log_event(self.case_id, "ORCHESTRATOR", f"STEP_START_{current_step.upper()}", "RUNNING", f"LLM Decision: {thinking}", db_session=db)
+                # Ensure start logs are anchored before execution
+                db.commit()
+                db.refresh(db_case)
 
                 result = await self._execute_step(current_step, db, db_case, payload)
                 event = result.get("event", "FAILED")
@@ -169,7 +286,8 @@ class CaseOrchestrator:
                     logger.error(f"[orchestrator] Step '{current_step}' failed. Halting.")
                     break
 
-                # Refresh DB state
+                # Refresh DB state to ensure we have the absolute latest audit_log
+                # (in case the agent used its own session internally)
                 db.refresh(db_case)
 
                 current_step = self._resolve_next_step(event, db_case.status)
@@ -180,8 +298,7 @@ class CaseOrchestrator:
             )
 
         except Exception as e:
-            logger.error(f"[orchestrator] Unhandled error: {e}")
-            traceback.print_exc()
+            logger.exception(f"[orchestrator] Unhandled error: {e}")
             try:
                 db_case = crud_case.get_case(db, case_id=self.case_id)
                 if db_case:
@@ -192,6 +309,8 @@ class CaseOrchestrator:
                 pass
         finally:
             db.close()
+            if case_lock.locked():
+                case_lock.release()
 
     # ─────────────────────────────────────────
     # LLM SUPERVISOR RESOLVER
@@ -205,8 +324,8 @@ class CaseOrchestrator:
         Returns {"thinking": str, "next_step": str | None}
         """
         try:
-            # Initialize LLM (Gemini)
-            llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp")
+            # Model order is centrally managed in utils.llm_util
+            model_order = get_model_order("orchestrator_supervisor")
 
             # Prepare Step Registry Description
             step_registry_desc = "\n".join(
@@ -230,11 +349,40 @@ class CaseOrchestrator:
                 history_summary=history_summary,
             )
 
-            logger.info(f"[orchestrator] Calling Supervisor LLM for decision on {self.case_id}...")
-            response = await llm.ainvoke([
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": context_msg}
-            ])
+            logger.info(
+                f"[orchestrator] Calling Supervisor LLM for decision on {self.case_id} "
+                f"with fallback order: {model_order}"
+            )
+
+            all_keys = get_keys()
+            response = None
+            last_model_error = None
+
+            if not all_keys:
+                raise RuntimeError("No GOOGLE_API_KEY values found for orchestrator supervisor.")
+
+            for key_index, api_key in enumerate(all_keys):
+                for model_name in model_order:
+                    try:
+                        llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key)
+                        response = await llm.ainvoke([
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": context_msg}
+                        ])
+                        logger.info(
+                            f"[orchestrator] Supervisor LLM used key {key_index + 1}/{len(all_keys)} with model: {model_name}"
+                        )
+                        break
+                    except Exception as model_err:
+                        last_model_error = model_err
+                        logger.warning(
+                            f"[orchestrator] Supervisor failed on key {key_index + 1}/{len(all_keys)} model '{model_name}': {model_err}. Trying next model..."
+                        )
+                if response is not None:
+                    break
+
+            if response is None:
+                raise RuntimeError(f"All orchestrator models failed. Last error: {last_model_error}")
 
             # Parse JSON response
             content = response.content.strip()
@@ -249,6 +397,24 @@ class CaseOrchestrator:
             if step and step not in STEP_REGISTRY:
                 logger.warning(f"[orchestrator] LLM suggested unknown step: {step}. Falling back to None.")
                 decision["next_step"] = None
+
+            # Trigger-aware guardrail: use deterministic first-step for external trigger entry points.
+            external_triggers = {
+                "CASE_CREATED",
+                "SYNC_REQUESTED",
+                "DOCUMENTS_UPLOADED",
+                "ELIGIBILITY_REQUESTED",
+                "STAFF_APPROVED",
+                "GENERATE_PACKET_REQUESTED",
+            }
+            if last_event in external_triggers:
+                fallback_step = self._resolve_next_step(last_event, db_case.status)
+                if decision.get("next_step") != fallback_step:
+                    logger.warning(
+                        f"[orchestrator] For trigger '{last_event}', overriding LLM step "
+                        f"'{decision.get('next_step')}' with deterministic step '{fallback_step}'."
+                    )
+                    decision["next_step"] = fallback_step
                 
             return decision
 
@@ -268,11 +434,17 @@ class CaseOrchestrator:
         # Hardcoded fallback logic since we removed the global TRANSITIONS constant
         FALLBACK_MAP = {
             ("CASE_CREATED",       None):                               "ehr_fetch",
+            ("SYNC_REQUESTED",     None):                               "ehr_fetch",
             ("EHR_FETCH_DONE",     CaseStatus.EHR_FETCHED.value):      "gap_analysis",
             ("GAP_CLEARED",        CaseStatus.GAP_CLEARED.value):      "eligibility",
+            ("DOCUMENTS_UPLOADED", CaseStatus.GAP_FOUND.value):        "gap_analysis",
             ("DOCUMENTS_UPLOADED", CaseStatus.GAP_CLEARED.value):      "eligibility",
+            ("ELIGIBILITY_REQUESTED", None):                           "eligibility",
             ("ELIGIBLE",           "APPROVED"):                         "packet_gen",
+            ("GENERATE_PACKET_REQUESTED", CaseStatus.APPROVED.value):   "packet_gen",
+            ("GENERATE_PACKET_REQUESTED", CaseStatus.GAP_CLEARED.value): "eligibility",
             ("PACKET_DONE",        CaseStatus.PACKET_READY.value):      "pending_approval",
+            ("AUTO_SUBMIT",        CaseStatus.PACKET_READY.value):      "submit",
             ("STAFF_APPROVED",     CaseStatus.PENDING_APPROVAL.value):  "submit",
         }
         
@@ -309,8 +481,7 @@ class CaseOrchestrator:
                 logger.warning(f"[orchestrator] Unknown step: '{step}'")
                 return {"event": "FAILED", "error": f"Unknown step: {step}"}
         except Exception as e:
-            logger.error(f"[orchestrator] Step '{step}' raised: {e}")
-            traceback.print_exc()
+            logger.exception(f"[orchestrator] Step '{step}' raised: {e}")
             try:
                 db_case.status = CaseStatus.FAILED.value
                 db.add(db_case)
@@ -325,43 +496,174 @@ class CaseOrchestrator:
     # ─────────────────────────────────────────
 
     async def _step_ehr_fetch(self, db: Session, db_case, payload: dict) -> dict:
-        """Step 1 — Fetch and extract EHR data for the patient."""
+        """
+        Step 1 — Fetch and extract EHR data for the patient.
+        
+        OPTIMIZATION 3: EHR Smart Cache
+        - First fetch: Query database (300-500ms)
+        - Within 5 minutes: Return cached result (<1ms)
+        - After 5 minutes: Fresh fetch again
+        """
+        from utils.cache_manager import general_cache
+        
+        # ──── CACHE CHECK (NEW - Optimization 3) ────
+        EHR_CACHE_TTL_SECONDS = 300  # 5 minutes
+        
+        # Use CacheManager to check for fresh EHR fetch result
+        # The key is case-specific to ensure isolation
+        cache_key = f"ehr_fetch_done:{self.case_id}"
+        if general_cache.get(cache_key, ttl=EHR_CACHE_TTL_SECONDS):
+            logger.info(
+                f"[orchestrator] EHR cache HIT for {self.case_id} (TTL={EHR_CACHE_TTL_SECONDS}s)"
+            )
+            return {"event": "EHR_FETCH_DONE"}
+        
+        # ──── FRESH EHR FETCH ────
         db_case.status = CaseStatus.EHR_FETCHING.value
         db.add(db_case)
         db.commit()
+        db.refresh(db_case)
 
-        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_START", "RUNNING", "Fetching patient EHR data")
+        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_START", "RUNNING", "Fetching patient EHR data", db_session=db)
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         fill_extracted_data_from_ehr(db, patient_id=db_case.patient_id, case_id=db_case.case_id)
 
         db_case.status = CaseStatus.EHR_FETCHED.value
         db.add(db_case)
         db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_COMPLETE", "SUCCESS", "EHR data fetched")
+        db.refresh(db_case)
+        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_COMPLETE", "SUCCESS", "EHR data fetched", db_session=db)
+        # Final refresh for this step is OK as we commit next or memory.save commits
+        db.refresh(db_case)
+
+        # Store in cache so we skip this for the next 5 minutes
+        general_cache.set(cache_key, "DONE")
 
         return {"event": "EHR_FETCH_DONE"}
 
     async def _step_gap_analysis(self, db: Session, db_case, payload: dict) -> dict:
-        """Step 2 — Run gap analysis LLM agent."""
-        agent_props = {
-            "case_id": self.case_id,
-            "patient_name": f"Patient {db_case.patient_id}",
-            "pdf_path": payload.get("pdf_path"),
-        }
-        result = await run_gap_analysis(agent_props)
+        """
+        Step 2 — Run gap analysis LLM agent.
+        
+        OPTIMIZATION 4: Delta Gap Analysis
+        - First run: Full LLM analysis (expensive)
+        - Re-runs on file upload: Use lightweight delta version (fast)
+        """
+        from agents.gap_analysis_agent import run_gap_analysis_delta
+        
+        db_case.status = CaseStatus.GAP_ANALYSIS_RUNNING.value
+        db.add(db_case)
+        db.commit()
 
-        db.refresh(db_case)
-        new_status = db_case.status
-
-        # Determine the outgoing event from DB status (agent wrote it)
-        if new_status == CaseStatus.GAP_CLEARED.value:
-            event = "GAP_CLEARED"
-        elif new_status == CaseStatus.GAP_FOUND.value:
-            event = "GAP_FOUND"   # → waiting for docs, no next step yet
+        # ──── OPTIMIZATION 4: Detect if we should use Delta Analysis ────
+        trigger = getattr(self, '_current_trigger', None)  # Will be set by run() method
+        use_delta = (
+            trigger == "DOCUMENTS_UPLOADED" and 
+            self.memory.succeeded("gap_analysis")  # Prior gap analysis exists
+        )
+        
+        if use_delta:
+            # Lightweight delta analysis - compare new files vs old gaps
+            logger.info(f"[orchestrator] Using DELTA gap analysis for {self.case_id} (file upload trigger)")
+            
+            previous_gap = self.memory.get_last_result("gap_analysis")
+            newly_uploaded = db_case.uploaded_files[-len(db_case.uploaded_files) + max(0, len(db_case.uploaded_files) - 5):] \
+                           if db_case.uploaded_files else []
+            
+            agent_props = {
+                "case_id": self.case_id,
+                "previous_gap_result": previous_gap,
+                "newly_uploaded_files": newly_uploaded,
+                "payer_name": db_case.insurance_company,
+                "ehr_data_cached": self.memory.get_cached_data("ehr_data"),  # Opt 7: Pass cached EHR
+            }
+            result = await run_gap_analysis_delta(agent_props)
+            log_event(self.case_id, "ORCHESTRATOR", "USING_DELTA_ANALYSIS", "RUNNING", "Lightweight re-analysis for uploads", db_session=db)
+            # db.refresh(db_case) removed (wipes pending log entry)
+        
         else:
-            event = "FAILED"
+            # Full gap analysis (first run or other triggers)
+            logger.info(f"[orchestrator] Using FULL gap analysis for {self.case_id}")
+            
+            agent_props = {
+                "case_id": self.case_id,
+                "patient_name": f"Patient {db_case.patient_id}",
+                "pdf_path": payload.get("pdf_path"),
+                "payer_name": db_case.insurance_company,
+                "ehr_data_cached": self.memory.get_cached_data("ehr_data"),  # Opt 7: Pass cached EHR
+            }
+            result = await run_gap_analysis(agent_props)
+        
+        parsed = result.get("output") or {}
 
-        return {"event": event, "gap_result": result.get("output")}
+        # ── PERSISTENCE (Moved from agent to Orchestrator) ──
+        summary = parsed.get("summary", {})
+        db_case.gap_result = parsed
+
+        # Determine next status based on LLM output
+        new_status = parsed.get("status")
+        if new_status == "INCOMPLETE":
+            db_case.status = CaseStatus.GAP_ANALYSIS_FAILED.value
+            event = "FAILED"
+        elif new_status == CaseStatus.GAP_FOUND.value:
+            db_case.status = CaseStatus.GAP_FOUND.value
+            event = "GAP_FOUND"
+        elif new_status == CaseStatus.GAP_CLEARED.value:
+            db_case.status = CaseStatus.GAP_CLEARED.value
+            event = "GAP_CLEARED"
+        else:
+            # Fallback: if no missing docs, it's cleared
+            missing_docs = parsed.get("missing_documents")
+            if isinstance(missing_docs, list) and len(missing_docs) == 0:
+                db_case.status = CaseStatus.GAP_CLEARED.value
+                event = "GAP_CLEARED"
+            else:
+                db_case.status = CaseStatus.GAP_FOUND.value
+                event = "GAP_FOUND"
+
+        db_case.total_required = summary.get("total_required")
+        db_case.total_matched  = summary.get("total_matched")
+        db_case.total_missing  = summary.get("total_missing")
+        db_case.gap_percentage = summary.get("gap_percentage")
+
+        db.add(db_case)
+        db.commit()
+        db.refresh(db_case)
+
+        # ── AUTO-SUMMARIZATION (NEW: Concurrent & Cached) ──
+        if event == "GAP_CLEARED":
+            log_event(
+                self.case_id, 
+                "ORCHESTRATOR", 
+                "AUTO_SUMMARIZATION_STARTED", 
+                "RUNNING", 
+                "Summarizing uploaded patient files in parallel", 
+                db_session=db
+            )
+            db.commit() # Force flush for frontend visibility
+            
+            try:
+                # Runs concurrently and uses hash-based caching
+                # No need to await if we want it truly backgrounded, 
+                # but for Eligibility to use them, we should await.
+                await summarize_case_documents(self.case_id)
+                log_event(
+                    self.case_id, 
+                    "ORCHESTRATOR", 
+                    "AUTO_SUMMARIZATION_COMPLETED", 
+                    "SUCCESS", 
+                    "Patient documents distilled and cached", 
+                    db_session=db
+                )
+            except Exception as e:
+                logger.error(f"[orchestrator] Auto-summarization failed: {e}")
+                log_event(self.case_id, "ORCHESTRATOR", "AUTO_SUMMARIZATION_FAILED", "WARNING", str(e), db_session=db)
+
+        # Final refresh for the step is fine
+        db.refresh(db_case)
+
+        return {"event": event, "gap_result": parsed}
 
     async def _step_eligibility(self, db: Session, db_case, payload: dict) -> dict:
         """Step 3 — Run eligibility check.
@@ -376,24 +678,58 @@ class CaseOrchestrator:
                 f"[orchestrator] Passing prior gap_analysis result into eligibility for {self.case_id}"
             )
 
+        db_case.status = CaseStatus.ELIGIBILITY_RUNNING.value
+        db.add(db_case)
+        db.commit()
+
         loop = asyncio.get_event_loop()
+        from functools import partial
+        eligibility_func = partial(run_eligibility_check, db_session=db)
+        
         result = await loop.run_in_executor(
             None,
-            run_eligibility_check,
+            eligibility_func,
             {
                 "case_id": self.case_id,
                 "pdf_path": payload.get("pdf_path"),
+                "payer_name": db_case.insurance_company,
                 # Gap context is implicitly available via DB; we log it in memory
                 "_gap_context": gap_output,
+                "ehr_data_cached": self.memory.get_cached_data("ehr_data"),  # Opt 7: Pass cached EHR
             },
         )
 
+        # ── PERSISTENCE (Moved from agent to Orchestrator) ──
+        db_case.eligibility_result = result
+        db_case.eligibility_verdict = result.get("verdict")
+        db_case.confidence_score = result.get("probability_score", 0)
+        
+        if result.get("eligible"):
+            db_case.status = CaseStatus.APPROVED.value
+            event = "ELIGIBLE"
+            if db_case.confidence_score >= 80:
+                db_case.auto_submit_reason = f"AI Auto-Approved (Confidence: {db_case.confidence_score}%)"
+            else:
+                db_case.auto_submit_reason = f"Requires Manual Review (Confidence: {db_case.confidence_score}% < 80%)"
+        else:
+            db_case.status = CaseStatus.DENIED.value
+            event = "NOT_ELIGIBLE"
+            db_case.auto_submit_reason = f"AI Denied (Confidence: {db_case.confidence_score}%)"
+
+        db.add(db_case)
+        db.commit()
         db.refresh(db_case)
 
-        if result.get("eligible"):
-            event = "ELIGIBLE"
-        else:
-            event = "NOT_ELIGIBLE"
+        log_event(
+            case_id=self.case_id,
+            agent_name="ELIGIBILITY_AGENT",
+            event="ELIGIBILITY_CHECK_COMPLETED",
+            status=event,
+            message=result.get("reason", "")[:200],
+            db_session=db
+        )
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         return {"event": event, "eligibility_result": result}
 
@@ -402,8 +738,11 @@ class CaseOrchestrator:
         db_case.status = CaseStatus.PACKET_GENERATING.value
         db.add(db_case)
         db.commit()
+        db.refresh(db_case)
 
-        log_event(self.case_id, "ORCHESTRATOR", "PACKET_GEN_START", "RUNNING", "Generating PA document package")
+        log_event(self.case_id, "ORCHESTRATOR", "PACKET_GEN_START", "RUNNING", "Generating PA document package", db_session=db)
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         loop = asyncio.get_event_loop()
 
@@ -412,8 +751,14 @@ class CaseOrchestrator:
         if eligibility_output:
             logger.info(f"[orchestrator] PA gen has access to eligibility result from memory.")
 
-        content = await loop.run_in_executor(
-            None, generate_pa_content, self.case_id, payload.get("pdf_path")
+        # Opt 7 & 10: Parallel Triple-Stream Generation (Async)
+        content = await generate_pa_content(
+            case_id=self.case_id,
+            payer_name=db_case.insurance_company,
+            cpt_code=db_case.cpt_code,
+            pdf_path=payload.get("pdf_path"),
+            ehr_data_cached=self.memory.get_cached_data("ehr_data"),
+            db_session=db
         )
 
         # Collect uploaded file paths to attach to the PDF
@@ -424,18 +769,27 @@ class CaseOrchestrator:
                 if path and os.path.exists(path):
                     uploaded_paths.append(path)
 
-        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_START", "RUNNING", "Building final PDF package")
+        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_START", "RUNNING", "Building final PDF package", db_session=db)
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
         output_pdf = await loop.run_in_executor(
             None, generate_pa_pdf, self.case_id, content, uploaded_paths
         )
 
         logger.info(f"[orchestrator] PDF generated: {output_pdf}")
-        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_COMPLETE", "SUCCESS", f"PDF: {os.path.basename(output_pdf)}")
+        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_COMPLETE", "SUCCESS", f"PDF: {os.path.basename(output_pdf)}", db_session=db)
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         db_case.status = CaseStatus.PACKET_READY.value
         db.add(db_case)
         db.commit()
 
+        # BRANCHING LOGIC: Decide if we should go to manual approval or auto-submit
+        if db_case.confidence_score and db_case.confidence_score >= 80:
+            logger.info(f"[orchestrator] HIGH CONFIDENCE ({db_case.confidence_score}%) - Triggering AUTO-SUBMIT for {self.case_id}")
+            return {"event": "AUTO_SUBMIT", "pdf_path": output_pdf}
+        
         return {"event": "PACKET_DONE", "pdf_path": output_pdf}
 
     async def _step_pending_approval(self, db: Session, db_case) -> dict:
@@ -443,12 +797,16 @@ class CaseOrchestrator:
         db_case.status = CaseStatus.PENDING_APPROVAL.value
         db.add(db_case)
         db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "ORCHESTRATION_FLOW_COMPLETE", "SUCCESS", "Case ready for staff review")
+        db.refresh(db_case)
+        log_event(self.case_id, "ORCHESTRATOR", "ORCHESTRATION_FLOW_COMPLETE", "SUCCESS", "Case ready for staff review", db_session=db)
+        # Final refresh for this step is fine as it returns AWAITING_STAFF
+        db.refresh(db_case)
         # Stop here — next trigger comes externally ("STAFF_APPROVED")
         return {"event": "AWAITING_STAFF"}
 
     async def _step_submit(self, db: Session, db_case) -> dict:
-        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting package to insurance portal")
+        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting package to insurance portal", db_session=db)
+        # db.refresh(db_case) removed (wipes pending log entry)
         
         try:
             # Get the path to the generated PDF
@@ -498,23 +856,19 @@ class CaseOrchestrator:
             db_case.status = CaseStatus.TRACKING.value
             db.add(db_case)
             db.commit()
+            db.refresh(db_case)
             
-            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_COMPLETE", "SUCCESS", "Package accepted by payer. Now tracking status.")
+            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_COMPLETE", "SUCCESS", "Package accepted by payer. Now tracking status.", db_session=db)
+            # db.refresh(db_case) removed (wipes pending log entry)
             
         except Exception as e:
             logger.error(f"[orchestrator] Submission failed: {e}")
-            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_FAILED", "FAILED", str(e))
+            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_FAILED", "FAILED", str(e), db_session=db)
+            # db.refresh(db_case) removed (wipes pending log entry)
             db_case.status = CaseStatus.FAILED.value
             db.add(db_case)
             db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting to payer")
-
-        await asyncio.sleep(2)  # Simulated network latency
-
-        db_case.status = CaseStatus.TRACKING.value
-        db.add(db_case)
-        db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_COMPLETE", "SUCCESS", "Package accepted by payer. Tracking.")
+            return {"event": "FAILED", "error": str(e)}
 
         return {"event": "SUBMITTED"}
 
@@ -528,7 +882,10 @@ class CaseOrchestrator:
         All previously SUCCEEDED steps are skipped automatically.
         """
         logger.info(f"[orchestrator] RETRY requested for {self.case_id}")
-        log_event(self.case_id, "ORCHESTRATOR", "RETRY_STARTED", "RUNNING", "Retrying last failed step")
+        log_event(self.case_id, "ORCHESTRATOR", "RETRY_STARTED", "RUNNING", "Retrying last failed step", db_session=db)
+        # Ensure retry log is anchored
+        db.commit()
+        db.refresh(db_case)
 
         # Find the last failed step from memory
         history = self.memory.get_history()
@@ -553,10 +910,41 @@ class CaseOrchestrator:
         )
         self.memory.save(db)
 
-        # If retry succeeded, continue the main flow
+        # If retry succeeded, continue deterministically from resulting event
         if event != "FAILED":
             db.refresh(db_case)
             next_step = self._resolve_next_step(event, db_case.status)
-            if next_step:
-                # Resume from where we left off
-                await self.run(event, payload)
+            continued = 0
+            while next_step:
+                continued += 1
+                if continued > self._max_steps:
+                    logger.error(
+                        f"[orchestrator] Safety stop during retry continuation for {self.case_id}: exceeded max steps ({self._max_steps})."
+                    )
+                    break
+
+                if self.memory.succeeded(next_step):
+                    logger.info(f"[orchestrator] Retry continuation skipping '{next_step}' — already succeeded.")
+                    prior_result = self.memory.get_last_result(next_step)
+                    prior_event = prior_result.get("event", "") if prior_result else ""
+                    db.refresh(db_case)
+                    next_step = self._resolve_next_step(prior_event, db_case.status)
+                    continue
+
+                follow_result = await self._execute_step(next_step, db, db_case, payload)
+                follow_event = follow_result.get("event", "FAILED")
+
+                self.memory.record(
+                    step=next_step,
+                    inputs={"case_id": self.case_id, "retry_chain": True},
+                    result=follow_result,
+                    status="SUCCESS" if follow_event != "FAILED" else "FAILED",
+                )
+                self.memory.save(db)
+
+                if follow_event == "FAILED":
+                    logger.error(f"[orchestrator] Retry continuation step '{next_step}' failed. Halting.")
+                    break
+
+                db.refresh(db_case)
+                next_step = self._resolve_next_step(follow_event, db_case.status)

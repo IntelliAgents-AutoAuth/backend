@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from crud.crud_ehr import get_ehr
 from crud.crud_extracted_data import create_extracted_data, get_extracted_data
+from crud.crud_case import get_case
 from schemas.extracted_data import ExtractedDataCreate
 
 
@@ -59,4 +60,29 @@ def fill_extracted_data_from_ehr(db: Session, patient_id: str, case_id: str) -> 
 
     print(f"[extraction_service] --- Data Extraction Started for {case_id} ---")
     create_extracted_data(db, payload)
+
+    # ─────────────────────────────────────────────────────────
+    # SYNC TO CASE (Crucial for Orchestrator & Agents)
+    # ─────────────────────────────────────────────────────────
+    db_case = get_case(db, case_id)
+    if db_case:
+        updated = False
+        if not db_case.insurance_company and ehr.insurance_company:
+            db_case.insurance_company = ehr.insurance_company
+            updated = True
+        if not db_case.cpt_code and ehr.cpt_code:
+            db_case.cpt_code = ehr.cpt_code
+            updated = True
+        if not db_case.icd10_code and ehr.icd10_code:
+            db_case.icd10_code = ehr.icd10_code
+            updated = True
+        if not db_case.patient_name and (ehr.patient_first_name or ehr.patient_last_name):
+            db_case.patient_name = f"{ehr.patient_first_name} {ehr.patient_last_name}".strip()
+            updated = True
+            
+        if updated:
+            db.add(db_case)
+            db.commit()
+            print(f"[extraction_service] Synced EHR metadata to Case {case_id}")
+
     print(f"[extraction_service] --- Data Extraction Completed for {case_id} ---")

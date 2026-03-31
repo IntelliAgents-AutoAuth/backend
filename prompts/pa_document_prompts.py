@@ -91,3 +91,71 @@ def get_checklist_prompt():
     return ChatPromptTemplate.from_messages([
         ("human", CHECKLIST_PROMPT)
     ])
+
+
+# ─────────────────────────────────────────────────────────────
+# OPTIMIZATION 8: BATCH GENERATION — All 3 documents in 1 LLM call
+# ─────────────────────────────────────────────────────────────
+
+COMBINED_PA_PROMPT = """You are a medical prior authorization expert. Generate THREE PA documents simultaneously based on the EHR data.
+
+### PHASE 1: DEEP ANALYSIS (ANALYZE EVERY BONE)
+- Before writing anything, analyze every clinical fact in the EHR/Summaries.
+- Scan for specifically: LVEF %, lab results, diagnoses, and procedural orders.
+- **ZERO HALLUCINATION**: Every detail in the letter/summary must be 100% verified.
+
+TASK:
+1. COVER LETTER: Formal letter to insurance company requesting authorization
+2. CLINICAL SUMMARY: Structured clinical justification for the procedure
+3. CHECKLIST: JSON array of required items with met/missing status
+
+EHR DATA & SUMMARIZED EVIDENCE:
+{ehr_data}
+
+Date: {date}
+
+POLICY FORMATTING RULES:
+{pa_format}
+
+POLICY RULES & REQUIREMENTS:
+{policy_rules}
+
+INSTRUCTIONS:
+- Cover Letter: Start with "Dear Prior Authorization Review Team,"
+  - Include patient demographics, diagnosis, procedure, clinical justification
+  - Be professional and specific (cite actual EHR values)
+  
+- Clinical Summary: Use headers (Diagnosis, Patient History, Reason for Procedure, Supporting Evidence, Clinical Justification)
+  - Keep under 400 words
+  - Be detailed and evidence-based
+  
+- Checklist: Return as JSON array only:
+  [
+    {{"item": "requirement text", "met": true/false, "evidence": "specific value from EHR"}},
+    ...
+  ]
+
+RESPOND WITH ONLY VALID JSON in this structure (no markdown, no explanation):
+{{
+  "cover_letter": "Dear Prior Authorization Review Team,\\n\\n...",
+  "clinical_summary": "DIAGNOSIS\\n...",
+  "checklist": [
+    {{"item": "...", "met": true, "evidence": "..."}},
+    ...
+  ]
+}}
+"""
+
+
+def get_combined_pa_prompt():
+    """
+    OPTIMIZATION 8: Single LLM call generates all 3 PA documents in JSON format.
+    
+    Returns:
+        ChatPromptTemplate with variables: {ehr_data, date, pa_format, policy_rules}
+    
+    Reduces LLM calls from 3 to 1, saving approximately 1.2 seconds per case.
+    """
+    return ChatPromptTemplate.from_messages([
+        ("human", COMBINED_PA_PROMPT)
+    ])

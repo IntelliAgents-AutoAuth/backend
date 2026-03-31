@@ -38,10 +38,7 @@ logger = logging.getLogger(__name__)
 # HYBRID CACHE (L1 RAM + L2 DB)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Global L1 Cache in RAM
-# Key: case_id, Value: list of log entries
-_MEMORY_CACHE: dict[str, list[dict]] = {}
-
+from utils.cache_manager import general_cache
 
 class OrchestratorMemory(BaseChatMessageHistory):
     """
@@ -50,13 +47,14 @@ class OrchestratorMemory(BaseChatMessageHistory):
     Inherits from LangChain's BaseChatMessageHistory to allow use within
     LangChain chains, while maintaining our structured audit_log in SQL.
 
-    L1: RAM (Process-level dictionary)
+    L1: RAM (Process-level dictionary via general_cache)
     L2: DB (cases.audit_log column)
     """
 
     def __init__(self, case_id: str):
         self.case_id = case_id
         self._log: list[dict] = []
+        # _data_cache no longer needed as a self-instance; we use general_cache
 
     # ─────────────────────────────────────────
     # LANGCHAIN PROXY (read-only for messages)
@@ -123,9 +121,28 @@ class OrchestratorMemory(BaseChatMessageHistory):
     def clear(self) -> None:
         """Clear both L1 RAM and prepare for L2 purge."""
         self._log = []
-        if self.case_id in _MEMORY_CACHE:
-            del _MEMORY_CACHE[self.case_id]
+        general_cache.delete(f"memory:{self.case_id}")
+        general_cache.delete(f"data:{self.case_id}")
         logger.info(f"[memory] Cleared memory for case {self.case_id}")
+
+    # ─────────────────────────────────────────
+    # DATA CACHING (for arbitrary objects like EHR data)
+    # ─────────────────────────────────────────
+
+    def set_cached_data(self, key: str, value: Any) -> None:
+        """Store arbitrary data in L1 cache (e.g., EHR data for multi-agent access)."""
+        # Store using a namespaced key in general_cache
+        general_cache.set(f"data:{self.case_id}:{key}", value)
+        logger.info(f"[memory] Cached data for key='{key}' in case {self.case_id}")
+
+    def get_cached_data(self, key: str) -> Any | None:
+        """Retrieve cached data (e.g., EHR data) from L1 cache."""
+        value = general_cache.get(f"data:{self.case_id}:{key}")
+        if value is not None:
+            logger.info(f"[memory] Cache HIT for key='{key}' in case {self.case_id}")
+        else:
+            logger.info(f"[memory] Cache MISS for key='{key}' in case {self.case_id}")
+        return value
 
     # ─────────────────────────────────────────
     # PERSISTENCE (L1/L2 logic)
@@ -133,9 +150,10 @@ class OrchestratorMemory(BaseChatMessageHistory):
 
     def load(self, db) -> None:
         """Load history: RAM Cache first (L1), then DB Fallback (L2)."""
-        # 1. Try RAM Cache (L1)
-        if self.case_id in _MEMORY_CACHE:
-            self._log = _MEMORY_CACHE[self.case_id]
+        # 1. Try RAM Cache (L1) via general_cache
+        cached_log = general_cache.get(f"memory:{self.case_id}")
+        if cached_log is not None:
+            self._log = cached_log
             logger.info(f"[memory] L1 CACHE HIT: Loaded {len(self._log)} entries for {self.case_id}")
             return
 
@@ -147,7 +165,7 @@ class OrchestratorMemory(BaseChatMessageHistory):
             self._log = []
 
         # Update RAM Cache for next time
-        _MEMORY_CACHE[self.case_id] = self._log
+        general_cache.set(f"memory:{self.case_id}", self._log)
         logger.info(
             f"[memory] L1 CACHE MISS (L2 Loaded): {len(self._log)} entries for {self.case_id}"
         )
@@ -155,17 +173,43 @@ class OrchestratorMemory(BaseChatMessageHistory):
     def save(self, db) -> None:
         """Save history: Sync L1 RAM and flush to L2 DB."""
         # Update L1 RAM
-        _MEMORY_CACHE[self.case_id] = self._log
+        general_cache.set(f"memory:{self.case_id}", self._log)
 
         # Update L2 DB
+        # IMPORTANT: Merge with existing audit_log instead of replacing it
+        # This preserves event-based logs from agent_logger while adding orchestrator steps
         db_case = crud_case.get_case(db, case_id=self.case_id)
         if db_case:
-            db_case.audit_log = list(self._log)
+            # Get existing audit log (contains event-based entries from agent_logger)
+            existing_audit_log = db_case.audit_log or []
+            
+            # Extract step names we're recording (to avoid duplicating old versions)
+            recorded_steps = {entry.get("step") for entry in self._log if entry.get("step")}
+            
+            # Filter existing log: keep events and non-conflicting steps
+            merged_log = []
+            for entry in existing_audit_log:
+                # Keep all event-based entries (from agent_logger)
+                if "event" in entry and "agent_name" in entry:
+                    merged_log.append(entry)
+                # Keep steps we're not re-recording
+                elif entry.get("step") not in recorded_steps:
+                    merged_log.append(entry)
+            
+            # Add new orchestrator step entries
+            merged_log.extend(self._log)
+            
+            # Sort by timestamp to maintain chronological order
+            merged_log.sort(key=lambda x: x.get("timestamp", ""), reverse=False)
+            
+            db_case.audit_log = merged_log
             db.add(db_case)
             db.commit()
             logger.info(
-                f"[memory] L1 and L2 synchronized for case {self.case_id}"
+                f"[memory] L1 and L2 synchronized for case {self.case_id} "
+                f"(merged: {len(existing_audit_log)} existing + {len(self._log)} steps = {len(merged_log)} total)"
             )
+
 
     # ─────────────────────────────────────────
     # RECORDING
@@ -189,7 +233,7 @@ class OrchestratorMemory(BaseChatMessageHistory):
         self._log.append(entry)
         
         # Immediate L1 Cache update
-        _MEMORY_CACHE[self.case_id] = self._log
+        general_cache.set(f"memory:{self.case_id}", self._log)
         
         logger.info(f"[memory] Recorded step '{step}' → {status}")
 
@@ -213,6 +257,24 @@ class OrchestratorMemory(BaseChatMessageHistory):
         for entry in reversed(self._log):
             if (entry.get("step") or entry.get("event")) == step:
                 return entry.get("result") or entry.get("metadata")
+        return None
+
+    def get_timestamp(self, step: str) -> datetime | None:
+        """
+        Return the timestamp of the last execution of a step.
+        Used for cache freshness checks (e.g., EHR fetch within 5 minutes).
+        
+        Returns:
+            datetime object or None if step not found
+        """
+        for entry in reversed(self._log):
+            if (entry.get("step") or entry.get("event")) == step:
+                ts_str = entry.get("timestamp")
+                if ts_str:
+                    try:
+                        return datetime.fromisoformat(ts_str)
+                    except Exception:
+                        return None
         return None
 
     def get_history(self) -> list[dict]:
