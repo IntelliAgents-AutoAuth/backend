@@ -751,19 +751,15 @@ class CaseOrchestrator:
         if eligibility_output:
             logger.info(f"[orchestrator] PA gen has access to eligibility result from memory.")
 
-        # Opt 7: Pass all data via keyword arguments to avoid positional mismatch
-        ehr_cached = self.memory.get_cached_data("ehr_data")
-        pa_content_func = partial(
-            generate_pa_content,
+        # Opt 7 & 10: Parallel Triple-Stream Generation (Async)
+        content = await generate_pa_content(
             case_id=self.case_id,
             payer_name=db_case.insurance_company,
             cpt_code=db_case.cpt_code,
             pdf_path=payload.get("pdf_path"),
-            ehr_data_cached=ehr_cached,
+            ehr_data_cached=self.memory.get_cached_data("ehr_data"),
             db_session=db
         )
-        
-        content = await loop.run_in_executor(None, pa_content_func)
 
         # Collect uploaded file paths to attach to the PDF
         uploaded_paths = []

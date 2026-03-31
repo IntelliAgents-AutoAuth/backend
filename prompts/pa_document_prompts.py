@@ -99,6 +99,11 @@ def get_checklist_prompt():
 
 COMBINED_PA_PROMPT = """You are a medical prior authorization expert. Generate THREE PA documents simultaneously based on the EHR data.
 
+### PHASE 1: DEEP ANALYSIS (ANALYZE EVERY BONE)
+- Before writing anything, analyze every clinical fact in the EHR/Summaries.
+- Scan for specifically: LVEF %, lab results, diagnoses, and procedural orders.
+- **ZERO HALLUCINATION**: Every detail in the letter/summary must be 100% verified.
+
 TASK:
 1. COVER LETTER: Formal letter to insurance company requesting authorization
 2. CLINICAL SUMMARY: Structured clinical justification for the procedure

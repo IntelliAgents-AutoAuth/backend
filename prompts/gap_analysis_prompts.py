@@ -20,6 +20,14 @@ PART 1 — GAP ANALYSIS:
   Example: "echocardiogram report" = "echo_report" — SAME THING
   Example: "BNP lab test" = "cardiac lab results" — SAME THING
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACCURACY & ANTI-HALLUCINATION RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. PHASE 1: INTERNAL ANALYSIS. Before generating the JSON, you must analyze every "bone" of the patient record. 
+2. ZERO HALLUCINATION: If a value like LVEF is not in the EHR/PDF, it is NOT FOUND. Do not guess.
+3. CITATION: Every match must reference the specific EHR key or PDF filename.
+4. "ANALYZE EVERY BONE": Thoroughly scan SOAP notes, lab values, and procedural summaries.
+
 PART 2 — FRONTEND FORM BUILDER:
 For each missing document, think like a frontend developer.
 You are building an HTML form field for this item.

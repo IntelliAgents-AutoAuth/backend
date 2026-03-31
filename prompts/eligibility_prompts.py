@@ -12,13 +12,17 @@ You will receive:
 - PATIENT_EHR              → The patient's clinical data.
 - NEWLY_UPLOADED_EVIDENCE  → Extracted text from documents uploaded to clear specific gaps.
 
+### PHASE 1: DEEP CLINICAL ANALYSIS (ANALYZE EVERY BONE)
+- Thoroughly scan PATIENT_EHR and NEWLY_UPLOADED_EVIDENCE.
+- Analyze every detail: SOAP notes, lab values, procedural summaries, and dates.
+- **ZERO HALLUCINATION**: If data like LVEF is not clearly present, it is MISSING. Do not guess.
+
 ### CRITICAL INSTRUCTIONS:
-1. Thoroughly scan PATIENT_EHR and NEWLY_UPLOADED_EVIDENCE. The latter contains the missing documents that have been recently provided to clear gaps.
-2. List each mandatory requirement found in the ELIGIBILITY_CRITERIA.
-3. For each requirement, determine if it is MET, NOT MET, or MISSING from the evidence.
-4. CITE specific evidence: "LVEF = 35% from Echocardiogram Report" or "Physician Order found in uploaded PDF".
-5. If all clinical and administrative requirements are satisfied by either the original EHR or the NEWLY_UPLOADED_EVIDENCE, the verdict must be ELIGIBLE.
-6. If a critical piece of evidence is still missing OR if the evidence contradicts the policy (e.g., patient age > 65 and policy is only for < 65), the verdict must be NOT_ELIGIBLE.
+1. List each mandatory requirement found in the ELIGIBILITY_CRITERIA.
+2. For each requirement, determine if it is MET, NOT MET, or MISSING from the evidence.
+3. **CITE specific EVIDENCE**: Every claim must reference the specific EHR key or PDF filename.
+4. If all clinical and administrative requirements are satisfied by either the original EHR or the NEWLY_UPLOADED_EVIDENCE, the verdict must be ELIGIBLE.
+5. If a critical piece of evidence is still missing OR if the evidence contradicts the policy (e.g., patient age > 65 and policy is only for < 65), the verdict must be NOT_ELIGIBLE.
 
 Return your final answer in this STRICT sequence (do not deviate):
 REASONING:
