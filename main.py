@@ -10,24 +10,32 @@ try:
     from phoenix.otel import register
     from openinference.instrumentation.langchain import LangChainInstrumentor
     
-    # Launch Phoenix internally
-    if not px.active_session():
-        session = px.launch_app()
-        print(f"[observability] Phoenix dashboard launched: {session.url}")
+    # Launch Phoenix internally with resilience
+    PHOENIX_ENABLED = os.getenv("PHOENIX_ENABLED", "true").lower() == "true"
+    
+    if PHOENIX_ENABLED:
+        try:
+            if not px.active_session():
+                session = px.launch_app()
+                print(f"[observability] Phoenix dashboard launched: {session.url}")
+            else:
+                print(f"[observability] Phoenix dashboard already active.")
+            
+            # Use the phoenix.otel.register() helper to set up tracing
+            tracer_provider = register()
+            
+            # Instrument LangChain with the registered provider
+            LangChainInstrumentor().instrument(tracer_provider=tracer_provider, skip_dep_check=True)
+            print("[observability] LangChain instrumentation (via OTEL register) active globally.")
+        except Exception as px_e:
+            print(f"[observability] Phoenix app/otel failed to start (app will still run): {px_e}")
     else:
-        print(f"[observability] Phoenix dashboard already active.")
-    
-    # Use the phoenix.otel.register() helper to set up tracing
-    # This automatically configures the tracer provider to send to the local Phoenix instance
-    tracer_provider = register()
-    
-    # Instrument LangChain with the registered provider
-    LangChainInstrumentor().instrument(tracer_provider=tracer_provider, skip_dep_check=True)
-    print("[observability] LangChain instrumentation (via OTEL register) active globally.")
+        print("[observability] Phoenix is disabled via environment variable.")
+        
 except ImportError:
     print("[observability] Phoenix or dependencies not installed, skipping.")
 except Exception as e:
-    print(f"[observability] Failed to initialize Phoenix: {e}")
+    print(f"[observability] Failed to initialize observability: {e}")
 
 from api.v1.api import api_router
 from core.config import settings

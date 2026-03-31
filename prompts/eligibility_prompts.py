@@ -26,6 +26,9 @@ REASONING:
 
 VERDICT:
 [ELIGIBLE or NOT_ELIGIBLE]
+
+PROBABILITY_OF_APPROVAL:
+[Integer 0-100 indicating your confidence that this claim will be approved by the insurance payer based ON THE EVIDENCE PROVIDED. 100 means all criteria are perfectly met and documented. 0 means failed clinical criteria or major evidence missing.]
 """
 
 

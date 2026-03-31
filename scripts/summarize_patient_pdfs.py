@@ -25,6 +25,8 @@ except Exception as e:
     print(f"[observability] Skipping Phoenix configuration: {e}")
 # -------------------------------
 
+import argparse
+
 async def summarize_pdf(pdf_path: str, llm, prompt_template) -> dict:
     print(f"Reading {pdf_path}...")
     try:
@@ -52,8 +54,17 @@ async def summarize_pdf(pdf_path: str, llm, prompt_template) -> dict:
         return {"file": os.path.basename(pdf_path), "error": str(e)}
 
 async def main():
-    target_dir = os.path.join(backend_dir, "uploads", "PA-20260318-00006")
-    output_file = os.path.join(backend_dir, "uploads", "all_summarized_data.json")
+    parser = argparse.ArgumentParser(description="Summarize patient PDFs for a specific case.")
+    parser.add_argument("--case_id", type=str, default="PA-20260318-00006", help="The case identifier (e.g. PA-20260318-00006)")
+    args = parser.parse_args()
+    
+    case_id = args.case_id
+    target_dir = os.path.join(backend_dir, "uploads", case_id)
+    
+    # Case-specific output file to ensure isolation
+    output_file = os.path.join(backend_dir, "uploads", f"{case_id}_summaries.json")
+    # Also maintain the global file for backward compatibility if using the default case
+    global_output_file = os.path.join(backend_dir, "uploads", "all_summarized_data.json")
 
     if not os.path.exists(target_dir):
         print(f"Directory not found: {target_dir}")
@@ -64,7 +75,7 @@ async def main():
         print(f"No PDFs found in {target_dir}")
         return
 
-    print(f"Found {len(pdf_files)} PDFs. Start concurrent summarization...")
+    print(f"Found {len(pdf_files)} PDFs for case {case_id}. Start concurrent summarization...")
     
     llm = RobustLLM.get_llm_for_task(task="summarization")
     if not llm:
@@ -79,14 +90,21 @@ async def main():
     # Run all tasks concurrently
     results = await asyncio.gather(*tasks)
 
-    # Save all outputs to one place
+    # Save to case-specific output
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=4)
+    
+    # Legacy support: also update the global file if we're running the default case
+    if case_id == "PA-20260318-00006":
+        with open(global_output_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=4)
+        print(f"Legacy global file updated: {global_output_file}")
         
-    print(f"Successfully summarized {len(results)} PDFs.")
+    print(f"Successfully summarized {len(results)} PDFs for {case_id}.")
     print(f"Output saved to {output_file}")
     
-    input("\n[observability] Traces sent to Phoenix. Press Enter to exit and close the local Phoenix Server...")
+    # Only wait for input if not running in a script/tool environment (check TTY if possible, or just skip for now)
+    # input("\n[observability] Traces sent to Phoenix. Press Enter to exit...")
 
 if __name__ == "__main__":
     asyncio.run(main())

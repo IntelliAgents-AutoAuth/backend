@@ -58,11 +58,11 @@ class RobustLLM:
     def get_llm_for_task(task: str, temperature: float = 0):
         keys = _get_api_keys()
         if not keys:
-            print("[llm_util] ERROR: No Google API keys found in .env!")
+            logger.error("[llm_util] ERROR: No Google API keys found in .env!")
             return None
         model_order = get_model_order(task)
         if not model_order:
-            print(f"[llm_util] ERROR: No model order configured for task '{task}'.")
+            logger.error(f"[llm_util] ERROR: No model order configured for task '{task}'.")
             return None
         # Returns the primary model for this task. Callers can iterate full order if needed.
         return build_llm(model=model_order[0], api_key=keys[0], temperature=temperature)

@@ -1,6 +1,6 @@
 [
     {
-        "file": "test_doc.pdf",
+        "file": "United Healthcare_75563.pdf",
         "extracted_data": {
             "required_documents": [
                 {
@@ -31,19 +31,12 @@
             ],
             "eligibility_criteria": [
                 "Patient must have a confirmed diagnosis of one of the following conditions: Dilated Cardiomyopathy (ICD-10: I42.0), Hypertrophic Cardiomyopathy (ICD-10: I42.1), Restrictive Cardiomyopathy (ICD-10: I42.5), Cardiac Sarcoidosis (ICD-10: D86.85), or Suspected Cardiac Tumor or Mass.",
-                "Symptoms (Shortness of breath on exertion, Chest pain or pressure, Palpitations or arrhythmia, Unexplained syncope or near-syncope, Reduced exercise tolerance) must be present and documented for a minimum period of 3 months.",
-                "Patient must have completed an echocardiogram prior to the MRI request.",
-                "The echocardiogram must show a documented LVEF (Left Ventricular Ejection Fraction) value and evidence of wall motion abnormality or structural cardiac abnormality requiring further characterization.",
-                "The request must be ordered by a board-certified Cardiologist or Cardiac Electrophysiologist.",
-                "Cardiac MRI is covered when echocardiogram findings are inconclusive.",
-                "Cardiac MRI is covered for assessment of myocardial viability.",
-                "Cardiac MRI is covered for evaluation of cardiac masses or tumors.",
-                "Cardiac MRI is covered for assessment of pericardial disease.",
-                "Cardiac MRI is covered for congenital heart disease evaluation.",
-                "Repeat MRI within 6 months is not covered without new symptoms."
+                "Symptoms must be present and documented for a minimum period of 3 months including: Shortness of breath on exertion, Chest pain or pressure, Palpitations or arrhythmia, Unexplained syncope or near-syncope, or Reduced exercise tolerance.",
+                "Patient must have completed echocardiogram prior to MRI request. Echocardiogram must show: LVEF (Left Ventricular Ejection Fraction) documented value, AND Evidence of wall motion abnormality OR Structural cardiac abnormality requiring further characterization.",
+                "Request must be ordered by a board-certified Cardiologist or Cardiac Electrophysiologist."
             ],
             "pa_document_format": {
-                "instructions": "Submission of all required documentation is mandatory. Incomplete files will result in a delay in processing or a technical denial. All required documents must be submitted at the time of the request to avoid administrative delays; incomplete submissions will be returned without clinical review. Accepted formats for documents include PDF, DOCX, or Image files. Submissions can be made via Online Portal (UHCprovider.com/priorauth), Phone (1-866-889-8054), Fax (1-855-820-4189), or EDI Transaction Set 278.",
+                "instructions": "Submission of all required documentation is mandatory. Incomplete files will result in a delay in processing or a technical denial. All required documents must be submitted at the time of request to avoid administrative delays; incomplete submissions will be returned without clinical review. Accepted formats for documents include PDF, DOCX, or Image files as specified for each document type. Submissions can be made via the Online Portal (UHCprovider.com/priorauth), Phone (1-866-889-8054), Fax (1-855-820-4189), or EDI Transaction Set 278.",
                 "required_forms_mentioned": []
             }
         }

@@ -40,6 +40,7 @@ from agents.gap_analysis_agent import run_gap_analysis
 from agents.eligibility_agent import run_eligibility_check
 from agents.pa_document_agent import generate_pa_content
 from services.pdf_generator import generate_pa_pdf
+from services.summarization_service import summarize_case_documents
 from utils.agent_logger import log_event
 from utils.llm_util import get_keys, get_model_order
 from orchestrator.memory import OrchestratorMemory
@@ -149,6 +150,17 @@ class CaseOrchestrator:
 
             # Load prior agent call history for this case
             self.memory.load(db)
+            
+            log_event(
+                self.case_id,
+                "ORCHESTRATOR",
+                "ORCHESTRATOR_STARTED", 
+                "RUNNING",
+                f"Case processing started (trigger: {trigger})",
+                db_session=db
+            )
+            db.commit()
+            
             logger.info(
                 f"[orchestrator] Trigger='{trigger}' | "
                 f"Status={db_case.status} | "
@@ -249,7 +261,10 @@ class CaseOrchestrator:
                     continue
 
                 logger.info(f"[orchestrator] Executing step: '{current_step}' | Thinking: {thinking}")
-                log_event(self.case_id, "ORCHESTRATOR", f"STEP_START_{current_step.upper()}", "RUNNING", f"LLM Decision: {thinking}")
+                log_event(self.case_id, "ORCHESTRATOR", f"STEP_START_{current_step.upper()}", "RUNNING", f"LLM Decision: {thinking}", db_session=db)
+                # Ensure start logs are anchored before execution
+                db.commit()
+                db.refresh(db_case)
 
                 result = await self._execute_step(current_step, db, db_case, payload)
                 event = result.get("event", "FAILED")
@@ -271,7 +286,8 @@ class CaseOrchestrator:
                     logger.error(f"[orchestrator] Step '{current_step}' failed. Halting.")
                     break
 
-                # Refresh DB state
+                # Refresh DB state to ensure we have the absolute latest audit_log
+                # (in case the agent used its own session internally)
                 db.refresh(db_case)
 
                 current_step = self._resolve_next_step(event, db_case.status)
@@ -282,8 +298,7 @@ class CaseOrchestrator:
             )
 
         except Exception as e:
-            logger.error(f"[orchestrator] Unhandled error: {e}")
-            traceback.print_exc()
+            logger.exception(f"[orchestrator] Unhandled error: {e}")
             try:
                 db_case = crud_case.get_case(db, case_id=self.case_id)
                 if db_case:
@@ -429,6 +444,7 @@ class CaseOrchestrator:
             ("GENERATE_PACKET_REQUESTED", CaseStatus.APPROVED.value):   "packet_gen",
             ("GENERATE_PACKET_REQUESTED", CaseStatus.GAP_CLEARED.value): "eligibility",
             ("PACKET_DONE",        CaseStatus.PACKET_READY.value):      "pending_approval",
+            ("AUTO_SUBMIT",        CaseStatus.PACKET_READY.value):      "submit",
             ("STAFF_APPROVED",     CaseStatus.PENDING_APPROVAL.value):  "submit",
         }
         
@@ -465,8 +481,7 @@ class CaseOrchestrator:
                 logger.warning(f"[orchestrator] Unknown step: '{step}'")
                 return {"event": "FAILED", "error": f"Unknown step: {step}"}
         except Exception as e:
-            logger.error(f"[orchestrator] Step '{step}' raised: {e}")
-            traceback.print_exc()
+            logger.exception(f"[orchestrator] Step '{step}' raised: {e}")
             try:
                 db_case.status = CaseStatus.FAILED.value
                 db.add(db_case)
@@ -489,41 +504,41 @@ class CaseOrchestrator:
         - Within 5 minutes: Return cached result (<1ms)
         - After 5 minutes: Fresh fetch again
         """
-        import time
+        from utils.cache_manager import general_cache
         
         # ──── CACHE CHECK (NEW - Optimization 3) ────
         EHR_CACHE_TTL_SECONDS = 300  # 5 minutes
         
-        last_ehr_fetch_time = self.memory.get_timestamp("ehr_fetch")
-        if last_ehr_fetch_time:
-            seconds_since = (datetime.now(timezone.utc) - last_ehr_fetch_time).total_seconds()
-            if seconds_since < EHR_CACHE_TTL_SECONDS:
-                # EHR cache still fresh - return cached result
-                logger.info(
-                    f"[orchestrator] EHR cache HIT for {self.case_id}: "
-                    f"last fetch {seconds_since:.1f}s ago (TTL={EHR_CACHE_TTL_SECONDS}s)"
-                )
-                # Return same event as normal fetch (orchestrator doesn't know difference)
-                return {"event": "EHR_FETCH_DONE"}
-            else:
-                logger.info(
-                    f"[orchestrator] EHR cache EXPIRED for {self.case_id}: "
-                    f"last fetch {seconds_since:.1f}s ago (TTL={EHR_CACHE_TTL_SECONDS}s)"
-                )
+        # Use CacheManager to check for fresh EHR fetch result
+        # The key is case-specific to ensure isolation
+        cache_key = f"ehr_fetch_done:{self.case_id}"
+        if general_cache.get(cache_key, ttl=EHR_CACHE_TTL_SECONDS):
+            logger.info(
+                f"[orchestrator] EHR cache HIT for {self.case_id} (TTL={EHR_CACHE_TTL_SECONDS}s)"
+            )
+            return {"event": "EHR_FETCH_DONE"}
         
         # ──── FRESH EHR FETCH ────
         db_case.status = CaseStatus.EHR_FETCHING.value
         db.add(db_case)
         db.commit()
+        db.refresh(db_case)
 
-        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_START", "RUNNING", "Fetching patient EHR data")
+        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_START", "RUNNING", "Fetching patient EHR data", db_session=db)
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         fill_extracted_data_from_ehr(db, patient_id=db_case.patient_id, case_id=db_case.case_id)
 
         db_case.status = CaseStatus.EHR_FETCHED.value
         db.add(db_case)
         db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_COMPLETE", "SUCCESS", "EHR data fetched")
+        db.refresh(db_case)
+        log_event(self.case_id, "ORCHESTRATOR", "EHR_FETCH_COMPLETE", "SUCCESS", "EHR data fetched", db_session=db)
+        # Final refresh for this step is OK as we commit next or memory.save commits
+        db.refresh(db_case)
+
+        # Store in cache so we skip this for the next 5 minutes
+        general_cache.set(cache_key, "DONE")
 
         return {"event": "EHR_FETCH_DONE"}
 
@@ -564,7 +579,8 @@ class CaseOrchestrator:
                 "ehr_data_cached": self.memory.get_cached_data("ehr_data"),  # Opt 7: Pass cached EHR
             }
             result = await run_gap_analysis_delta(agent_props)
-            log_event(self.case_id, "ORCHESTRATOR", "USING_DELTA_ANALYSIS", "RUNNING", "Lightweight re-analysis for uploads")
+            log_event(self.case_id, "ORCHESTRATOR", "USING_DELTA_ANALYSIS", "RUNNING", "Lightweight re-analysis for uploads", db_session=db)
+            # db.refresh(db_case) removed (wipes pending log entry)
         
         else:
             # Full gap analysis (first run or other triggers)
@@ -615,13 +631,37 @@ class CaseOrchestrator:
         db.commit()
         db.refresh(db_case)
 
-        log_event(
-            case_id=self.case_id, 
-            agent_name="GAP_ANALYSIS_AGENT", 
-            event="GAP_ANALYSIS_COMPLETED", 
-            status=event, 
-            message=f"Missing {db_case.total_missing} of {db_case.total_required} documents"
-        )
+        # ── AUTO-SUMMARIZATION (NEW: Concurrent & Cached) ──
+        if event == "GAP_CLEARED":
+            log_event(
+                self.case_id, 
+                "ORCHESTRATOR", 
+                "AUTO_SUMMARIZATION_STARTED", 
+                "RUNNING", 
+                "Summarizing uploaded patient files in parallel", 
+                db_session=db
+            )
+            db.commit() # Force flush for frontend visibility
+            
+            try:
+                # Runs concurrently and uses hash-based caching
+                # No need to await if we want it truly backgrounded, 
+                # but for Eligibility to use them, we should await.
+                await summarize_case_documents(self.case_id)
+                log_event(
+                    self.case_id, 
+                    "ORCHESTRATOR", 
+                    "AUTO_SUMMARIZATION_COMPLETED", 
+                    "SUCCESS", 
+                    "Patient documents distilled and cached", 
+                    db_session=db
+                )
+            except Exception as e:
+                logger.error(f"[orchestrator] Auto-summarization failed: {e}")
+                log_event(self.case_id, "ORCHESTRATOR", "AUTO_SUMMARIZATION_FAILED", "WARNING", str(e), db_session=db)
+
+        # Final refresh for the step is fine
+        db.refresh(db_case)
 
         return {"event": event, "gap_result": parsed}
 
@@ -643,9 +683,12 @@ class CaseOrchestrator:
         db.commit()
 
         loop = asyncio.get_event_loop()
+        from functools import partial
+        eligibility_func = partial(run_eligibility_check, db_session=db)
+        
         result = await loop.run_in_executor(
             None,
-            run_eligibility_check,
+            eligibility_func,
             {
                 "case_id": self.case_id,
                 "pdf_path": payload.get("pdf_path"),
@@ -659,13 +702,19 @@ class CaseOrchestrator:
         # ── PERSISTENCE (Moved from agent to Orchestrator) ──
         db_case.eligibility_result = result
         db_case.eligibility_verdict = result.get("verdict")
+        db_case.confidence_score = result.get("probability_score", 0)
         
         if result.get("eligible"):
             db_case.status = CaseStatus.APPROVED.value
             event = "ELIGIBLE"
+            if db_case.confidence_score >= 80:
+                db_case.auto_submit_reason = f"AI Auto-Approved (Confidence: {db_case.confidence_score}%)"
+            else:
+                db_case.auto_submit_reason = f"Requires Manual Review (Confidence: {db_case.confidence_score}% < 80%)"
         else:
             db_case.status = CaseStatus.DENIED.value
             event = "NOT_ELIGIBLE"
+            db_case.auto_submit_reason = f"AI Denied (Confidence: {db_case.confidence_score}%)"
 
         db.add(db_case)
         db.commit()
@@ -676,8 +725,11 @@ class CaseOrchestrator:
             agent_name="ELIGIBILITY_AGENT",
             event="ELIGIBILITY_CHECK_COMPLETED",
             status=event,
-            message=result.get("reason", "")[:200]
+            message=result.get("reason", "")[:200],
+            db_session=db
         )
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         return {"event": event, "eligibility_result": result}
 
@@ -686,8 +738,11 @@ class CaseOrchestrator:
         db_case.status = CaseStatus.PACKET_GENERATING.value
         db.add(db_case)
         db.commit()
+        db.refresh(db_case)
 
-        log_event(self.case_id, "ORCHESTRATOR", "PACKET_GEN_START", "RUNNING", "Generating PA document package")
+        log_event(self.case_id, "ORCHESTRATOR", "PACKET_GEN_START", "RUNNING", "Generating PA document package", db_session=db)
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         loop = asyncio.get_event_loop()
 
@@ -696,16 +751,19 @@ class CaseOrchestrator:
         if eligibility_output:
             logger.info(f"[orchestrator] PA gen has access to eligibility result from memory.")
 
-        # Opt 7: Pass cached EHR data to PA document agent
+        # Opt 7: Pass all data via keyword arguments to avoid positional mismatch
         ehr_cached = self.memory.get_cached_data("ehr_data")
         pa_content_func = partial(
             generate_pa_content,
-            ehr_data_cached=ehr_cached
+            case_id=self.case_id,
+            payer_name=db_case.insurance_company,
+            cpt_code=db_case.cpt_code,
+            pdf_path=payload.get("pdf_path"),
+            ehr_data_cached=ehr_cached,
+            db_session=db
         )
         
-        content = await loop.run_in_executor(
-            None, pa_content_func, self.case_id, db_case.insurance_company, payload.get("pdf_path")
-        )
+        content = await loop.run_in_executor(None, pa_content_func)
 
         # Collect uploaded file paths to attach to the PDF
         uploaded_paths = []
@@ -715,18 +773,27 @@ class CaseOrchestrator:
                 if path and os.path.exists(path):
                     uploaded_paths.append(path)
 
-        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_START", "RUNNING", "Building final PDF package")
+        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_START", "RUNNING", "Building final PDF package", db_session=db)
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
         output_pdf = await loop.run_in_executor(
             None, generate_pa_pdf, self.case_id, content, uploaded_paths
         )
 
         logger.info(f"[orchestrator] PDF generated: {output_pdf}")
-        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_COMPLETE", "SUCCESS", f"PDF: {os.path.basename(output_pdf)}")
+        log_event(self.case_id, "ORCHESTRATOR", "PDF_BUILD_COMPLETE", "SUCCESS", f"PDF: {os.path.basename(output_pdf)}", db_session=db)
+        db.commit()
+        # db.refresh(db_case) removed (wipes pending log entry)
 
         db_case.status = CaseStatus.PACKET_READY.value
         db.add(db_case)
         db.commit()
 
+        # BRANCHING LOGIC: Decide if we should go to manual approval or auto-submit
+        if db_case.confidence_score and db_case.confidence_score >= 80:
+            logger.info(f"[orchestrator] HIGH CONFIDENCE ({db_case.confidence_score}%) - Triggering AUTO-SUBMIT for {self.case_id}")
+            return {"event": "AUTO_SUBMIT", "pdf_path": output_pdf}
+        
         return {"event": "PACKET_DONE", "pdf_path": output_pdf}
 
     async def _step_pending_approval(self, db: Session, db_case) -> dict:
@@ -734,12 +801,16 @@ class CaseOrchestrator:
         db_case.status = CaseStatus.PENDING_APPROVAL.value
         db.add(db_case)
         db.commit()
-        log_event(self.case_id, "ORCHESTRATOR", "ORCHESTRATION_FLOW_COMPLETE", "SUCCESS", "Case ready for staff review")
+        db.refresh(db_case)
+        log_event(self.case_id, "ORCHESTRATOR", "ORCHESTRATION_FLOW_COMPLETE", "SUCCESS", "Case ready for staff review", db_session=db)
+        # Final refresh for this step is fine as it returns AWAITING_STAFF
+        db.refresh(db_case)
         # Stop here — next trigger comes externally ("STAFF_APPROVED")
         return {"event": "AWAITING_STAFF"}
 
     async def _step_submit(self, db: Session, db_case) -> dict:
-        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting package to insurance portal")
+        log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_START", "RUNNING", "Submitting package to insurance portal", db_session=db)
+        # db.refresh(db_case) removed (wipes pending log entry)
         
         try:
             # Get the path to the generated PDF
@@ -789,12 +860,15 @@ class CaseOrchestrator:
             db_case.status = CaseStatus.TRACKING.value
             db.add(db_case)
             db.commit()
+            db.refresh(db_case)
             
-            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_COMPLETE", "SUCCESS", "Package accepted by payer. Now tracking status.")
+            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_COMPLETE", "SUCCESS", "Package accepted by payer. Now tracking status.", db_session=db)
+            # db.refresh(db_case) removed (wipes pending log entry)
             
         except Exception as e:
             logger.error(f"[orchestrator] Submission failed: {e}")
-            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_FAILED", "FAILED", str(e))
+            log_event(self.case_id, "ORCHESTRATOR", "SUBMISSION_FAILED", "FAILED", str(e), db_session=db)
+            # db.refresh(db_case) removed (wipes pending log entry)
             db_case.status = CaseStatus.FAILED.value
             db.add(db_case)
             db.commit()
@@ -812,7 +886,10 @@ class CaseOrchestrator:
         All previously SUCCEEDED steps are skipped automatically.
         """
         logger.info(f"[orchestrator] RETRY requested for {self.case_id}")
-        log_event(self.case_id, "ORCHESTRATOR", "RETRY_STARTED", "RUNNING", "Retrying last failed step")
+        log_event(self.case_id, "ORCHESTRATOR", "RETRY_STARTED", "RUNNING", "Retrying last failed step", db_session=db)
+        # Ensure retry log is anchored
+        db.commit()
+        db.refresh(db_case)
 
         # Find the last failed step from memory
         history = self.memory.get_history()

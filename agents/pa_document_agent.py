@@ -84,9 +84,9 @@ def _invoke(prompt_template, variables: dict) -> str:
             except Exception as e:
                 error_text = str(e)
                 if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-                    print(f"[pa_document_agent] model={model_name} exhausted on key {key_index + 1}. Trying next model on same key...")
+                    logger.warning(f"[pa_document_agent] model={model_name} exhausted on key {key_index + 1}. Trying next model on same key...")
                     continue
-                print(f"[pa_document_agent] model={model_name} key {key_index + 1} failed: {error_text}")
+                logger.error(f"[pa_document_agent] model={model_name} key {key_index + 1} failed: {error_text}")
                 continue
     raise Exception("All API keys exhausted or fatal error.")
 
@@ -180,7 +180,9 @@ def _invoke_combined_pa_generation(
 # PUBLIC API
 # ─────────────────────────────────────────
 
-def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: str | None = None, ehr_data_cached: dict | None = None) -> dict:
+from sqlalchemy.orm import Session
+
+def generate_pa_content(case_id: str, payer_name: str | None = None, cpt_code: str | None = None, pdf_path: str | None = None, ehr_data_cached: dict | None = None, db_session: Session | None = None) -> dict:
     """
     Generate all LLM content for the PA document.
 
@@ -190,6 +192,7 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
                     If not supplied, extracted from EHR data.
         pdf_path: Path to policy PDF (optional, not used for policy selection).
         ehr_data_cached: Pre-fetched EHR data from orchestrator memory (optional, Optimization 7).
+        db_session: Database session for logging.
 
     Returns:
         {
@@ -199,16 +202,14 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
           "checklist":        list[{item, met, evidence}],
         }
     """
-    if not pdf_path:
-        pdf_path = os.path.join(backend_dir, "policy-pdfs", "aetna", "test_doc.pdf")
-
     agent_start = time.time()
     log_event(
         case_id    = case_id,
         agent_name = "PA_DOCUMENT_AGENT",
         event      = "DOCUMENT_GENERATION_STARTED",
         status     = "RUNNING",
-        message    = f"Prior Auth package generation triggered for {payer_name}"
+        message    = f"Prior Auth package generation triggered (payer={payer_name}, cpt={cpt_code})",
+        db_session = db_session
     )
 
     # 1. Fetch EHR
@@ -220,21 +221,21 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             case_id    = case_id,
             agent_name = "PA_DOCUMENT_AGENT",
             event      = "EHR_CACHE_HIT",
-            status     = "SUCCESS"
+            status     = "SUCCESS",
+            db_session = db_session
         )
         ehr = ehr_data_cached
         logger.info(f"[pa_document_agent] Using cached EHR data from memory for {case_id}")
-        print(f"[pa_document_agent] Using cached EHR data from memory (no fetch needed)")
     else:
         log_event(
             case_id    = case_id,
             agent_name = "PA_DOCUMENT_AGENT",
             event      = "EHR_FETCH_STARTED",
-            status     = "RUNNING"
+            status     = "RUNNING",
+            db_session = db_session
         )
         ehr = fetch_extracted_data_by_case(case_id) or {}
         logger.info(f"[pa_document_agent] Fetched fresh EHR data for {case_id}")
-        print(f"[pa_document_agent] Fetched fresh EHR data (cache miss)")
     
     # Extract payer from EHR if not provided
     if not payer_name and isinstance(ehr, dict):
@@ -242,18 +243,18 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
     
     # Robust Fallback: Try fetching raw EHR data if extracted_data is empty
     if not ehr:
-        print(f"[pa_document_agent] EHR extracted data empty for {case_id}, trying raw EHR lookup...")
+        logger.info(f"[pa_document_agent] EHR extracted data empty for {case_id}, trying raw EHR lookup...")
         with SessionLocal() as db:
             db_case = get_case(db, case_id)
             if db_case:
                 # 1. Try raw EHR table
                 raw_ehr = get_ehr(db, db_case.patient_id)
                 if raw_ehr:
-                    print(f"[pa_document_agent] Found raw EHR for patient {db_case.patient_id}")
+                    logger.info(f"[pa_document_agent] Found raw EHR for patient {db_case.patient_id}")
                     ehr = raw_ehr.to_dict()
                 else:
-        # 2. Last resort: Basic case model placeholders
-                    print(f"[pa_document_agent] No raw EHR found, using Case placeholders.")
+                    # 2. Last resort: Basic case model placeholders
+                    logger.info(f"[pa_document_agent] No raw EHR found, using Case placeholders.")
                     ehr["patient_id"] = db_case.patient_id
                     ehr["patient_first_name"] = "Patient"
                     ehr["patient_last_name"] = str(db_case.patient_id)
@@ -264,10 +265,41 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
                     if not payer_name:
                         payer_name = db_case.insurance_company
     
-    # Bundle pre-summarized data
-    summarized_data_path = os.path.join(backend_dir, "uploads", "all_summarized_data.json")
+    # ── DYNAMIC PDF PATH SELECTION ──
+    if not pdf_path:
+        # Try to find a PDF for this specific payer
+        try:
+            if payer_name:
+                payer_dir_name = payer_name.lower().replace(" ", "-")
+                payer_policy_dir = os.path.join(backend_dir, "policy-pdfs", payer_dir_name)
+                if os.path.exists(payer_policy_dir):
+                    pdfs = [f for f in os.listdir(payer_policy_dir) if f.lower().endswith(".pdf")]
+                    if pdfs:
+                        pdf_path = os.path.join(payer_policy_dir, pdfs[0])
+                        logger.info(f"[pa_document_agent] Dynamically selected policy PDF: {pdf_path}")
+        except Exception as e:
+            logger.warning(f"[pa_document_agent] Failed dynamic PDF lookup: {e}")
+            
+        # Last resort fallback (preserve current behavior)
+        if not pdf_path:
+            pdf_path = os.path.join(backend_dir, "policy-pdfs", "aetna", "test_doc.pdf")
+            logger.info(f"[pa_document_agent] Using default fallback policy PDF: {pdf_path}")
+    
+    # Bundle pre-summarized data (Case-Specific First, then Global Fallback)
+    # OPTIMIZATION: Data Isolation - Look for summaries specific to this case_id
+    case_summarized_path = os.path.join(backend_dir, "uploads", f"{case_id}_summaries.json")
+    global_summarized_path = os.path.join(backend_dir, "uploads", "all_summarized_data.json")
+    
+    summarized_data_path = None
+    if os.path.exists(case_summarized_path):
+        summarized_data_path = case_summarized_path
+        logger.info(f"[pa_document_agent] Found case-specific summaries for {case_id}")
+    elif os.path.exists(global_summarized_path):
+        summarized_data_path = global_summarized_path
+        logger.warning(f"[pa_document_agent] Using global summaries fallback for {case_id} (Potential Isolation Risk)")
+    
     summarized_evidence_text = ""
-    if os.path.exists(summarized_data_path):
+    if summarized_data_path:
         try:
             with open(summarized_data_path, 'r', encoding='utf-8') as f:
                 summarized_data = json.load(f)
@@ -280,7 +312,7 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
                         continue
                     summarized_evidence_text += f"\n--- {fname} ---\n{summary}\n"
         except Exception as e:
-            print(f"[pa_document_agent] Failed to load summarized PDFs: {e}")
+            logger.error(f"[pa_document_agent] Failed to load summarized PDFs: {e}")
 
     ehr_text = _ehr_to_text(ehr) + summarized_evidence_text
     
@@ -289,7 +321,8 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
         agent_name  = "PA_DOCUMENT_AGENT",
         event       = "EHR_FETCH_COMPLETED",
         status      = "SUCCESS",
-        duration_ms = int((time.time() - ehr_fetch_start) * 1000)
+        duration_ms = int((time.time() - ehr_fetch_start) * 1000),
+        db_session  = db_session
     )
 
     # 2. Extract policy details and pa rules
@@ -298,16 +331,17 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
         case_id    = case_id,
         agent_name = "PA_DOCUMENT_AGENT",
         event      = "POLICY_RULES_LOADING_STARTED",
-        status     = "RUNNING"
+        status     = "RUNNING",
+        db_session = db_session
     )
     pa_format = "{}"
     policy_rules = "[]"
     
     try:
         from tools.policy_retriever import search_policy_criteria
-        pa_format = search_policy_criteria(doc_type="pa_document_format", payer=payer_name)
-        req_docs = search_policy_criteria(doc_type="required_documents", payer=payer_name)
-        elig_crit = search_policy_criteria(doc_type="eligibility_criteria", payer=payer_name)
+        pa_format = search_policy_criteria(doc_type="pa_document_format", payer=payer_name, cpt=cpt_code)
+        req_docs = search_policy_criteria(doc_type="required_documents", payer=payer_name, cpt=cpt_code)
+        elig_crit = search_policy_criteria(doc_type="eligibility_criteria", payer=payer_name, cpt=cpt_code)
         policy_rules = f"{req_docs}\n\n{elig_crit}"
         
         log_event(
@@ -316,7 +350,8 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             event       = "POLICY_RULES_LOADING_COMPLETED",
             status      = "SUCCESS",
             message     = f"Policy data loaded for {payer_name}",
-            duration_ms = int((time.time() - pdf_start) * 1000)
+            duration_ms = int((time.time() - pdf_start) * 1000),
+            db_session  = db_session
         )
     except ValueError as e:
         logger.warning(f"[pa_document_agent] Policy data unavailable for {payer_name}: {e}. Using defaults.")
@@ -325,9 +360,9 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             agent_name = "PA_DOCUMENT_AGENT",
             event      = "POLICY_RULES_LOADING_PARTIAL",
             status     = "PARTIAL",
-            message    = f"Policy data unavailable for {payer_name}, using defaults"
+            message    = f"Policy data unavailable for {payer_name}, using defaults",
+            db_session = db_session
         )
-        print(f"[pa_document_agent] Policy rules loading partial (using defaults): {e}")
         pa_format = "{}"
         policy_rules = "[]"
     except Exception as e:
@@ -337,23 +372,24 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             agent_name = "PA_DOCUMENT_AGENT",
             event      = "POLICY_RULES_LOADING_FAILED",
             status     = "FAILED",
-            message    = str(e)
+            message    = str(e),
+            db_session = db_session
         )
-        print(f"[pa_document_agent] Policy rules loading failed: {e}")
         pa_format = "{}"
         policy_rules = "[]"
 
     today = datetime.now().strftime("%B %d, %Y")
 
     # 3-5. OPTIMIZATION 8: Generate all PA documents in single batch call (instead of 3 separate calls)
-    print("[pa_document_agent] Generating all PA documents in batch (Optimization 8)...")
+    logger.info("[pa_document_agent] Generating all PA documents in batch (Optimization 8)...")
     batch_start = time.time()
     log_event(
         case_id    = case_id,
         agent_name = "PA_DOCUMENT_AGENT",
         event      = "BATCH_PA_GENERATION_STARTED",
         status     = "RUNNING",
-        message    = "Generating cover letter, clinical summary, and checklist in single LLM call (Opt 8)"
+        message    = "Generating cover letter, clinical summary, and checklist in single LLM call (Opt 8)",
+        db_session = db_session
     )
     
     try:
@@ -376,7 +412,8 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             event       = "BATCH_PA_GENERATION_COMPLETED",
             status      = "SUCCESS",
             duration_ms = batch_duration_ms,
-            message     = f"All 3 documents generated in {batch_duration_ms}ms (67% faster than 3 separate calls)"
+            message     = f"All 3 documents generated in {batch_duration_ms}ms (67% faster than 3 separate calls)",
+            db_session  = db_session
         )
         print(f"[pa_document_agent] Batch generation succeeded in {batch_duration_ms}ms (saved ~1200ms vs 3 calls)")
         
@@ -387,12 +424,13 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             agent_name = "PA_DOCUMENT_AGENT",
             event      = "BATCH_PA_GENERATION_FAILED",
             status     = "FALLBACK",
-            message    = f"Falling back to 3 individual calls: {str(e)}"
+            message    = f"Falling back to 3 individual calls: {str(e)}",
+            db_session = db_session
         )
         
         # Fallback: 3 separate calls (original behavior)
         cl_start = time.time()
-        log_event(case_id=case_id, agent_name="PA_DOCUMENT_AGENT", event="COVER_LETTER_GENERATION_STARTED", status="RUNNING")
+        log_event(case_id=case_id, agent_name="PA_DOCUMENT_AGENT", event="COVER_LETTER_GENERATION_STARTED", status="RUNNING", db_session=db_session)
         cover_letter = _invoke(
             get_cover_letter_prompt(),
             {"ehr_data": ehr_text, "date": today, "pa_format": pa_format},
@@ -402,11 +440,12 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             agent_name="PA_DOCUMENT_AGENT",
             event="COVER_LETTER_GENERATION_COMPLETED",
             status="SUCCESS",
-            duration_ms=int((time.time() - cl_start) * 1000)
+            duration_ms=int((time.time() - cl_start) * 1000),
+            db_session=db_session
         )
 
         cs_start = time.time()
-        log_event(case_id=case_id, agent_name="PA_DOCUMENT_AGENT", event="CLINICAL_SUMMARY_GENERATION_STARTED", status="RUNNING")
+        log_event(case_id=case_id, agent_name="PA_DOCUMENT_AGENT", event="CLINICAL_SUMMARY_GENERATION_STARTED", status="RUNNING", db_session=db_session)
         clinical_summary = _invoke(
             get_clinical_summary_prompt(),
             {"ehr_data": ehr_text, "pa_format": pa_format},
@@ -416,11 +455,12 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             agent_name="PA_DOCUMENT_AGENT",
             event="CLINICAL_SUMMARY_GENERATION_COMPLETED",
             status="SUCCESS",
-            duration_ms=int((time.time() - cs_start) * 1000)
+            duration_ms=int((time.time() - cs_start) * 1000),
+            db_session=db_session
         )
 
         ch_start = time.time()
-        log_event(case_id=case_id, agent_name="PA_DOCUMENT_AGENT", event="CHECKLIST_GENERATION_STARTED", status="RUNNING")
+        log_event(case_id=case_id, agent_name="PA_DOCUMENT_AGENT", event="CHECKLIST_GENERATION_STARTED", status="RUNNING", db_session=db_session)
         raw_checklist = _invoke(
             get_checklist_prompt(),
             {"ehr_data": ehr_text, "policy_rules": policy_rules},
@@ -430,7 +470,8 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             agent_name="PA_DOCUMENT_AGENT",
             event="CHECKLIST_GENERATION_COMPLETED",
             status="SUCCESS",
-            duration_ms=int((time.time() - ch_start) * 1000)
+            duration_ms=int((time.time() - ch_start) * 1000),
+            db_session=db_session
         )
 
         # Parse checklist JSON from individual call
@@ -439,7 +480,7 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
             clean = re.sub(r"```(?:json)?|```", "", raw_checklist).strip()
             checklist = json.loads(clean)
         except Exception as e:
-            print(f"[pa_document_agent] Checklist JSON parse failed: {e}")
+            logger.error(f"[pa_document_agent] Checklist JSON parse failed: {e}")
         checklist = [{"item": "See generated summary", "met": True, "evidence": raw_checklist[:300]}]
 
     log_event(
@@ -448,7 +489,8 @@ def generate_pa_content(case_id: str, payer_name: str | None = None, pdf_path: s
         event       = "DOCUMENT_GENERATION_COMPLETED",
         status      = "SUCCESS",
         message     = f"Generated cover letter, summary, and {len(checklist)} checklist items",
-        duration_ms = int((time.time() - agent_start) * 1000)
+        duration_ms = int((time.time() - agent_start) * 1000),
+        db_session  = db_session
     )
 
     return {

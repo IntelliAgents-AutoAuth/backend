@@ -1,76 +1,16 @@
 import os
 import json
 import time
+import logging
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _vectorstore = None
+logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────
-# OPTIMIZATION: Policy Cache (1-hour TTL)
-# ─────────────────────────────────────────────────────────────
-class PolicyCache:
-    """In-memory cache for policy queries with time-based expiration."""
-    
-    def __init__(self, ttl_seconds=3600):
-        """
-        Initialize cache with optional TTL.
-        
-        Args:
-            ttl_seconds: Time-to-live for cached entries (default: 1 hour)
-        """
-        self.cache = {}
-        self.ttl = ttl_seconds
-    
-    def get(self, key: str) -> str | None:
-        """
-        Retrieve value from cache if it exists and hasn't expired.
-        
-        Args:
-            key: Cache key (format: "{payer}:{doc_type}")
-        
-        Returns:
-            Cached value or None if not found/expired
-        """
-        if key not in self.cache:
-            return None
-        
-        data, timestamp = self.cache[key]
-        age_seconds = time.time() - timestamp
-        
-        if age_seconds < self.ttl:
-            return data  # Still valid
-        
-        # Expired, remove and return None
-        del self.cache[key]
-        return None
-    
-    def set(self, key: str, value: str):
-        """
-        Store value in cache with current timestamp.
-        
-        Args:
-            key: Cache key (format: "{payer}:{doc_type}")
-            value: Policy data to cache
-        """
-        self.cache[key] = (value, time.time())
-    
-    def clear(self):
-        """Clear all cached entries."""
-        self.cache.clear()
-    
-    def stats(self) -> dict:
-        """Return cache statistics."""
-        return {
-            "total_entries": len(self.cache),
-            "ttl_seconds": self.ttl
-        }
-
-
-# Global cache instance
-_policy_cache = PolicyCache(ttl_seconds=3600)  # 1 hour TTL
+from utils.cache_manager import policy_cache
 
 
 def get_policy_vectorstore():
@@ -96,7 +36,7 @@ def get_policy_vectorstore():
     return _vectorstore
 
 
-def search_policy_criteria_chromadb(doc_type: str, payer: str | None = None) -> str | None:
+def search_policy_criteria_chromadb(doc_type: str, payer: str | None = None, cpt: str | None = None) -> str | None:
     """
     Search the ChromaDB vector database for policy data with optional payer filtering.
     Returns policy data string or None if not found/unavailable.
@@ -114,28 +54,41 @@ def search_policy_criteria_chromadb(doc_type: str, payer: str | None = None) -> 
         return None
         
     try:
-        # Build filter with optional payer
-        where_filter = {"doc_type": doc_type}
+        # Build filter with optional payer — Chroma requires $and for multiple conditions
+        conditions = [{"doc_type": doc_type}]
         if payer:
-            where_filter["payer"] = payer
+            conditions.append({"payer": payer})
+        if cpt:
+            conditions.append({"cpt": cpt})
         
+        if len(conditions) > 1:
+            where_filter = {"$and": conditions}
+        else:
+            where_filter = conditions[0]
+            
         results = db.get(where=where_filter)
         if not results or not results.get("documents") or len(results["documents"]) == 0:
             return None
         
-        data = results["documents"][0]
-        # Validate data is meaningful (not too short or obviously empty)
-        if not data or (isinstance(data, str) and len(data.strip()) < 10):
-            return None
+        # OPTIMIZATION: Concatenate ALL matching policy docs instead of just taking the first one
+        # This ensures we handle multiple policy PDFs for the same payer (e.g. general + specific)
+        all_docs = results["documents"]
+        combined_data = "\n\n--- NEXT POLICY FRAGMENT ---\n\n".join(
+            [d for d in all_docs if d and isinstance(d, str) and len(d.strip()) >= 10]
+        )
         
-        return data
+        if not combined_data:
+            return None
+            
+        logger.info(f"Retrieved {len(all_docs)} matching policy fragments for {doc_type} (payer={payer})")
+        return combined_data
     except Exception as e:
         import logging
         logging.warning(f"ChromaDB query failed for {doc_type} (payer={payer}): {e}")
         return None
 
 
-def search_policy_criteria_json(doc_type: str, payer: str | None = None) -> str | None:
+def search_policy_criteria_json(doc_type: str, payer: str | None = None, cpt: str | None = None) -> str | None:
     """
     Fallback: search the extracted_policy_rules.json file for policy data with optional payer filtering.
     
@@ -160,22 +113,47 @@ def search_policy_criteria_json(doc_type: str, payer: str | None = None) -> str 
         
         # Find policy by payer or use first
         target_policy = None
-        if payer:
-            # Try to match policy by payer name in filename
-            payer_lower = payer.lower().replace(" ", "-")
+        if payer or cpt:
+            # Try to match policy by payer name and cpt in filename (e.g., "United Healthcare_75563.pdf")
+            payer_lower = (payer.lower().replace(" ", "-") if payer else "")
+            payer_raw = (payer.lower() if payer else "")
+            cpt_str = (str(cpt) if cpt else "")
+            
+            logger.info(f"[search_policy_json] Searching for Payer='{payer}' CPT='{cpt}' in {len(rules_data)} policies")
+            
             for policy in rules_data:
                 file_name = policy.get("file", "").lower()
-                # Match if payer name appears in the file path
-                if payer_lower in file_name or payer.lower() in file_name:
-                    target_policy = policy
-                    break
+                
+                # OPTIMIZATION: Prioritize exact matches for both payer AND cpt in filename
+                if payer and cpt:
+                    if (payer_raw in file_name or payer_lower in file_name) and cpt_str in file_name:
+                        target_policy = policy
+                        logger.info(f"[search_policy_json] Exact match found (Payer+CPT): {file_name}")
+                        break
+                
+                # Fallback to payer only
+                if payer and not target_policy:
+                    if payer_lower in file_name or payer_raw in file_name:
+                        target_policy = policy
+                        logger.info(f"[search_policy_json] Payer-only match found: {file_name}")
             
-            # If not found by filename, no match for this payer
-            if not target_policy:
-                return None
+            # Final fallback: Look for "General" policy if nothing found for insurance but CPT exists
+            if not target_policy and cpt:
+                for policy in rules_data:
+                    file_name = policy.get("file", "").lower()
+                    if cpt_str in file_name:
+                        target_policy = policy
+                        logger.info(f"[search_policy_json] CPT-only match found (General): {file_name}")
+                        break
+            
+            # If still not found by filename, check if there's any policy at all
+            if not target_policy and len(rules_data) > 0:
+                target_policy = rules_data[0]
+                logger.info(f"[search_policy_json] Using first available policy as absolute fallback: {target_policy.get('file')}")
         else:
             # Use first policy when no payer specified
             target_policy = rules_data[0]
+            logger.info(f"[search_policy_json] Using first available policy (no filter): {target_policy.get('file')}")
         
         target = target_policy.get("extracted_data", {})
         
@@ -184,7 +162,7 @@ def search_policy_criteria_json(doc_type: str, payer: str | None = None) -> str 
         elif doc_type == "required_documents":
             data = target.get("required_documents", [])
         elif doc_type == "pa_document_format":
-            data = target.get("format", {})
+            data = target.get("pa_document_format") or target.get("format", {})
         else:
             return None
         
@@ -200,7 +178,7 @@ def search_policy_criteria_json(doc_type: str, payer: str | None = None) -> str 
         return None
 
 
-def search_policy_criteria(doc_type: str, payer: str | None = None) -> str:
+def search_policy_criteria(doc_type: str, payer: str | None = None, cpt: str | None = None) -> str:
     """
     Search for policy criteria with automatic fallback and optional payer filtering.
     
@@ -222,32 +200,33 @@ def search_policy_criteria(doc_type: str, payer: str | None = None) -> str:
     import logging
     
     # ──── CACHE CHECK (NEW - Optimization 2) ────
-    cache_key = f"{payer}:{doc_type}"
-    cached_data = _policy_cache.get(cache_key)
+    cache_key = f"{payer}:{cpt}:{doc_type}"
+    cached_data = policy_cache.get(cache_key, ttl=3600)
     if cached_data:
         logging.info(f"[CACHE HIT] Policy '{doc_type}' (payer={payer}) from in-memory cache")
         return cached_data
     
-    # ──── CHROMADB QUERY ────
-    rag_data = search_policy_criteria_chromadb(doc_type, payer)
-    if rag_data:
-        logging.info(f"Loaded policy data '{doc_type}' from ChromaDB (payer={payer})")
-        # Store in cache for future queries
-        _policy_cache.set(cache_key, rag_data)
-        return rag_data
-    
-    # ──── JSON FALLBACK ────
-    json_data = search_policy_criteria_json(doc_type, payer)
+    # ──── JSON CACHE ("READ THE CODE") ────
+    json_data = search_policy_criteria_json(doc_type, payer, cpt)
     if json_data:
-        logging.info(f"Loaded policy data '{doc_type}' from extracted_policy_rules.json (payer={payer}, ChromaDB unavailable)")
-        # Store in cache for future queries
-        _policy_cache.set(cache_key, json_data)
+        logging.info(f"Loaded policy data '{doc_type}' from extracted_policy_rules.json (payer={payer}, cpt={cpt})")
+        # Store in in-memory cache for fast subsequent access
+        policy_cache.set(cache_key, json_data)
         return json_data
+    
+    # ──── CHROMADB FALLBACK ────
+    rag_data = search_policy_criteria_chromadb(doc_type, payer, cpt)
+    if rag_data:
+        logging.info(f"Loaded policy data '{doc_type}' from ChromaDB (payer={payer}, cpt={cpt})")
+        # Store in in-memory cache for fast subsequent access
+        policy_cache.set(cache_key, rag_data)
+        return rag_data
     
     # ──── NO DATA AVAILABLE ────
     payer_str = f" for payer '{payer}'" if payer else ""
+    cpt_str = f" with CPT '{cpt}'" if cpt else ""
     raise ValueError(
-        f"Policy data '{doc_type}'{payer_str} not available. "
+        f"Policy data '{doc_type}'{payer_str}{cpt_str} not available. "
         f"ChromaDB not initialized (run scripts/ingest_policies.py) "
         f"and extracted_policy_rules.json not found or empty."
     )

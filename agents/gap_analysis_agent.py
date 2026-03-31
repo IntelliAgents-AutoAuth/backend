@@ -64,7 +64,7 @@ def get_llm_chain(api_key=None, model_name: str | None = None):
 from db.session import SessionLocal
 from crud import crud_case
 
-async def run_gap_analysis(props: dict) -> dict:
+async def run_gap_analysis(props: dict, db_session = None) -> dict:
     """
     Main function — call this from FastAPI endpoint.
 
@@ -83,6 +83,7 @@ async def run_gap_analysis(props: dict) -> dict:
     """
     case_id      = props.get("case_id")
     payer_name   = props.get("payer_name")
+    cpt_out      = None
     patient_name = props.get("patient_name", "Unknown")
 
     from crud import crud_case
@@ -95,34 +96,58 @@ async def run_gap_analysis(props: dict) -> dict:
         agent_name = "GAP_ANALYSIS_AGENT",
         event      = "GAP_ANALYSIS_STARTED",
         status     = "RUNNING",
-        message    = f"Gap analysis triggered for {payer_name}"
+        message    = f"Gap analysis triggered for {payer_name}",
+        db_session = db_session
     )
 
     # ── 1. PRE-EXTRACT DATA ──────────────────
     required_docs_list = "ERROR: Failed to load required documents."
     ehr_data = "ERROR: Failed to fetch EHR data."
+    raw_ehr = None
+
+    # Fetch case metadata first to ensure we have Payer/CPT
+    db_case = None
+    try:
+        from crud import crud_case
+        db_case = crud_case.get_case(SessionLocal(), case_id=case_id)
+        if db_case:
+            # OPTIMIZATION: Resolve payer from multiple sources if missing
+            if not payer_name:
+                payer_name = db_case.insurance_company
+            
+            # Fallback to ExtractedData (from EHR) if still empty
+            if not payer_name:
+                from tools.ehr_fetcher import fetch_extracted_data_by_case
+                raw_extracted = fetch_extracted_data_by_case(case_id, extract_pdf_text=False)
+                if raw_extracted:
+                    payer_name = raw_extracted.get("payer_name") or raw_extracted.get("insurance_company")
+                    print(f"[gap_analysis_agent] Payer resolved from ExtractedData fallback: {payer_name}")
+            
+            cpt_out = db_case.cpt_code
+            if not cpt_out:
+                from tools.ehr_fetcher import fetch_extracted_data_by_case
+                raw_extracted = fetch_extracted_data_by_case(case_id, extract_pdf_text=False)
+                if raw_extracted:
+                    cpt_out = raw_extracted.get("cpt_code")
+                    print(f"[gap_analysis_agent] CPT resolved from ExtractedData fallback: {cpt_out}")
+
+            print(f"[gap_analysis_agent] Case metadata loaded: payer={payer_name}, cpt={cpt_out}")
+    except Exception as e:
+        print(f"[gap_analysis_agent] Failed to load case metadata: {e}")
 
     try:
         from tools.policy_retriever import search_policy_criteria
         
-        # Try to get payer from case if not provided
-        if not payer_name:
-            try:
-                db_case = crud_case.get_case(SessionLocal(), case_id=case_id)
-                if db_case:
-                    payer_name = db_case.insurance_company
-            except Exception:
-                pass
-        
         # Load required documents with payer filtering
         try:
-            required_docs_list = search_policy_criteria(doc_type="required_documents", payer=payer_name)
+            required_docs_list = search_policy_criteria(doc_type="required_documents", payer=payer_name, cpt=cpt_out)
             log_event(
                 case_id    = case_id,
                 agent_name = "GAP_ANALYSIS_AGENT",
                 event      = "POLICY_DATA_LOADED",
                 status     = "SUCCESS",
-                message    = f"Required documents loaded for {payer_name} from RAG"
+                message    = f"Required documents loaded for {payer_name} from RAG",
+                db_session = db_session
             )
             print(f"[gap_analysis_agent] Policy documents loaded for {payer_name}")
         except ValueError as e:
@@ -144,15 +169,6 @@ async def run_gap_analysis(props: dict) -> dict:
         print(f"[gap_analysis_agent] Policy loading failed: {e}")
         logger.error(f"[gap_analysis_agent] Policy loading failed: {e}")
         required_docs_list = "[]"
-    except Exception as e:
-        log_event(
-            case_id    = case_id,
-            agent_name = "GAP_ANALYSIS_AGENT",
-            event      = "POLICY_RULES_LOADING_FAILED",
-            status     = "FAILED",
-            message    = str(e)
-        )
-        print(f"[gap_analysis_agent] Policy Rules Loading failed: {e}")
 
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
@@ -162,47 +178,38 @@ async def run_gap_analysis(props: dict) -> dict:
         ehr_start = time.time()
         
         if ehr_from_cache:
-            log_event(
-                case_id    = case_id,
-                agent_name = "GAP_ANALYSIS_AGENT",
-                event      = "EHR_CACHE_HIT",
-                status     = "SUCCESS"
-            )
             raw_ehr = ehr_from_cache
             logger.info(f"[gap_analysis_agent] Using cached EHR data from memory for {case_id}")
-            print(f"[gap_analysis_agent] Using cached EHR data from memory (no fetch needed)")
+            print(f"[gap_analysis_agent] Using cached EHR data from memory")
         else:
-            log_event(
-                case_id    = case_id,
-                agent_name = "GAP_ANALYSIS_AGENT",
-                event      = "EHR_FETCH_STARTED",
-                status     = "RUNNING"
-            )
             raw_ehr = fetch_extracted_data_by_case(case_id)
             logger.info(f"[gap_analysis_agent] Fetched fresh EHR data for {case_id}")
-            print(f"[gap_analysis_agent] Fetched fresh EHR data (cache miss)")
         
+        # ─────────────────────────────────────────────────────────────
+        # CRITICAL FIX: Ensure Payer/CPT from DB aren't lost in raw_ehr
+        # ─────────────────────────────────────────────────────────────
+        if raw_ehr and isinstance(raw_ehr, dict) and db_case:
+            if not raw_ehr.get("payer_name"):
+                raw_ehr["payer_name"] = db_case.insurance_company
+            if not raw_ehr.get("insurance_company"):
+                raw_ehr["insurance_company"] = db_case.insurance_company
+            if not raw_ehr.get("cpt_code"):
+                raw_ehr["cpt_code"] = db_case.cpt_code
+                
         # Use default=str to handle datetime/date objects
         ehr_data = json.dumps(raw_ehr, indent=2, default=str) if raw_ehr else "No specific patient data found."
-
-        if raw_ehr is None:
-            ehr_count = 0
-        elif isinstance(raw_ehr, list):
-            ehr_count = len(raw_ehr)
-        elif isinstance(raw_ehr, dict):
-            ehr_count = len(raw_ehr)
-        else:
-            ehr_count = 1
 
         log_event(
             case_id     = case_id,
             agent_name  = "GAP_ANALYSIS_AGENT",
             event       = "EHR_FETCH_COMPLETED",
             status      = "SUCCESS",
-            message     = "EHR data fetched successfully",
-            duration_ms = int((time.time() - ehr_start) * 1000)
+            message     = f"Patient data and {payer_name or 'Unspecified'} policy loaded",
+            duration_ms = int((time.time() - ehr_start) * 1000),
+            db_session  = db_session
         )
-        print(f"[gap_analysis_agent] EHR data fetched for {case_id}; records={ehr_count}")
+        record_count = len(raw_ehr) if isinstance(raw_ehr, dict) else (1 if raw_ehr else 0)
+        print(f"[gap_analysis_agent] EHR data fetched for {case_id}; records={record_count}")
 
         if isinstance(raw_ehr, dict):
             uploaded_files = raw_ehr.get("uploaded_files") or raw_ehr.get("files") or raw_ehr.get("documents")
@@ -218,20 +225,50 @@ async def run_gap_analysis(props: dict) -> dict:
             agent_name = "GAP_ANALYSIS_AGENT",
             event      = "EHR_FETCH_FAILED",
             status     = "FAILED",
-            message    = str(e)
+            message    = str(e),
+            db_session = db_session
         )
         print(f"[gap_analysis_agent] EHR Fetch failed: {e}")
 
     # ── 2. PREPARE INPUT ─────────────────────
     uploaded_evidence = ""
     if raw_ehr and isinstance(raw_ehr, dict):
+        # A) From database record
         uploads = raw_ehr.get("user_uploaded_files")
         if uploads:
-            uploaded_evidence = "\n### NEWLY_UPLOADED_EVIDENCE:\n"
+            uploaded_evidence = "\n### NEWLY_UPLOADED_EVIDENCE (from database):\n"
             for i, up in enumerate(uploads, 1):
                 name = up.get("document_name") or up.get("file_path", "Unknown File")
                 text = up.get("extracted_text", "No text extracted.")
-                uploaded_evidence += f"\n--- DOCUMENT {i}: {name} ---\n{text}\n"
+                uploaded_evidence += f"\n--- DOCUMENT: {name} ---\n{text}\n"
+
+    # B) Direct from local disk (Safety Fallback)
+    upload_dir = os.path.join(backend_dir, "uploads", str(case_id))
+    if os.path.exists(upload_dir) and os.path.isdir(upload_dir):
+        try:
+            from pypdf import PdfReader
+            pdf_files = [f for f in os.listdir(upload_dir) if f.lower().endswith('.pdf')]
+            if pdf_files:
+                if not uploaded_evidence.strip():
+                    uploaded_evidence = "\n### NEWLY_UPLOADED_EVIDENCE (from server disk):\n"
+                else:
+                    uploaded_evidence += "\n### ADDITIONAL EVIDENCE FOUND ON DISK:\n"
+                
+                for pdf_file in pdf_files:
+                    pdf_path_full = os.path.join(upload_dir, pdf_file)
+                    try:
+                        reader = PdfReader(pdf_path_full)
+                        text = ""
+                        for page in reader.pages:
+                            extracted = page.extract_text()
+                            if extracted:
+                                text += extracted + "\n"
+                        if text.strip():
+                            uploaded_evidence += f"\n--- PDF FILE: {pdf_file} ---\n{text}\n"
+                    except Exception as inner_e:
+                        logger.warning(f"[gap_analysis_agent] Could not read local PDF {pdf_file}: {inner_e}")
+        except Exception as e:
+            logger.error(f"[gap_analysis_agent] Error reading uploads folder: {e}")
 
     agent_input = {
         "input": f"""
@@ -263,7 +300,8 @@ INSTRUCTIONS:
         agent_name = "GAP_ANALYSIS_AGENT",
         event      = "LLM_CALL_STARTED",
         status     = "RUNNING",
-        message    = "Sending to Gemini for gap analysis"
+        message    = "Sending to Gemini for gap analysis",
+        db_session = db_session
     )
 
     model_order = get_model_order("gap_analysis")
@@ -285,7 +323,8 @@ INSTRUCTIONS:
                     event       = "LLM_CALL_COMPLETED",
                     status      = "SUCCESS",
                     message     = f"Gemini responded successfully using model={model_name}, key={key_index + 1}",
-                    duration_ms = int((time.time() - llm_start) * 1000)
+                    duration_ms = int((time.time() - llm_start) * 1000),
+                    db_session  = db_session
                 )
                 break
             except Exception as e:
@@ -385,7 +424,7 @@ def _covers_gap(missing_doc: dict, uploaded_files: list) -> bool:
     return False
 
 
-async def run_gap_analysis_delta(props: dict) -> dict:
+async def run_gap_analysis_delta(props: dict, db_session = None) -> dict:
     """
     OPTIMIZATION 4: Lightweight gap analysis for file uploads.
     
@@ -417,7 +456,8 @@ async def run_gap_analysis_delta(props: dict) -> dict:
         agent_name="GAP_ANALYSIS_AGENT",
         event="DELTA_ANALYSIS_STARTED",
         status="RUNNING",
-        message=f"Delta gap analysis for {len(newly_uploaded)} uploaded files"
+        message=f"Delta gap analysis for {len(newly_uploaded)} uploaded files",
+        db_session=db_session
     )
     
     # Extract previous missing documents
@@ -462,7 +502,8 @@ async def run_gap_analysis_delta(props: dict) -> dict:
             agent_name="GAP_ANALYSIS_AGENT",
             event="DELTA_ANALYSIS_COMPLETED",
             status="SUCCESS",
-            message=f"Delta analysis: {len(newly_matched)} gaps covered"
+            message=f"Delta analysis: {len(newly_matched)} gaps covered",
+            db_session=db_session
         )
         
         return {
@@ -488,7 +529,8 @@ async def run_gap_analysis_delta(props: dict) -> dict:
             agent_name="GAP_ANALYSIS_AGENT",
             event="DELTA_ANALYSIS_COMPLETED",
             status="SUCCESS",
-            message=f"Delta analysis: {len(remaining_gaps)} gaps remain"
+            message=f"Delta analysis: {len(remaining_gaps)} gaps remain",
+            db_session=db_session
         )
         
         return {

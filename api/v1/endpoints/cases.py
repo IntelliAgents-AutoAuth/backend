@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi.responses import FileResponse
 import traceback
 import os
@@ -180,7 +180,12 @@ async def get_case_gap_analysis(
             detail=f"Case with ID {case_id} not found"
         )
     
-    return db_case.gap_result or {"status": "NOT_STARTED", "message": "Analysis in progress or not yet triggered."}
+    return {
+        "status": db_case.status,
+        "confidence_score": db_case.confidence_score,
+        "auto_submit_reason": db_case.auto_submit_reason,
+        **(db_case.gap_result or {"message": "Analysis in progress or not yet triggered."})
+    }
 
 
 @router.get("/{case_id}/timeline")
@@ -211,7 +216,11 @@ async def get_case_audit_log(
     if not db_case:
         raise HTTPException(status_code=404, detail="Case not found")
     
-    return db_case.audit_log or []
+    audit_log = db_case.audit_log or []
+    
+    # Return just the audit_log array for direct compatibility with frontend
+    # Frontend expects a simple array, not a wrapper object
+    return audit_log
 
 def _check_and_clear_gaps(db: Session, db_case, case_id) -> bool:
     """Check whether uploaded docs satisfy current missing requirements and mark GAP_CLEARED when true."""

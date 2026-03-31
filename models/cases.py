@@ -22,5 +22,7 @@ class Case(Base):
     gap_percentage    = Column(Float,        nullable=True)
     eligibility_result = Column(JSON,         nullable=True)
     eligibility_verdict = Column(String(30),  nullable=True)
-    uploaded_files    = Column(JSON,         nullable=True)
-    audit_log         = Column(JSON,         nullable=False, default=list)
+    uploaded_files     = Column(JSON,         nullable=True)
+    confidence_score   = Column(Float,        nullable=True)  # AI probability of approval (0-100)
+    auto_submit_reason = Column(String(255),  nullable=True)  # Reason for auto-submit or staff halt
+    audit_log          = Column(JSON,         nullable=False, default=lambda: [])

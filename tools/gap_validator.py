@@ -55,8 +55,7 @@ def gap_validator(required_docs: list, available_docs: list) -> dict:
         if not found:
             unmatched.append(required)
 
-    # logging for debug
-    print(f"[gap_validator] matched={len(matched)}, unmatched={len(unmatched)}, needs_llm={len(unmatched) > 0}")
+    # logging for debug removed (was print statement)
 
     return {
         "matched":            matched,

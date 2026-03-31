@@ -1,45 +1,48 @@
 import sqlite3
 import os
 
-# Calculate paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, 'data', 'autoauth.db')
-
 def migrate():
-    print(f"Connecting to database: {DB_PATH}")
-    if not os.path.exists(DB_PATH):
-        print("Database file not found. Creating a new one...")
-        # main.py will handle creation via Base.metadata.create_all
+    # Database path relative to this script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.dirname(current_dir)
+    db_path = os.path.abspath(os.path.join(backend_dir, "data", "autoauth.db"))
+
+    if not os.path.exists(db_path):
+        print(f"Error: Database not found at {db_path}")
         return
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # List of columns to add with their types
-    columns_to_add = [
-        ("patient_name", "VARCHAR(150)"),
-        ("total_required", "INTEGER"),
-        ("total_matched", "INTEGER"),
-        ("total_missing", "INTEGER"),
-        ("gap_percentage", "FLOAT"),
-        ("eligibility_result", "JSON"),
-        ("eligibility_verdict", "VARCHAR(30)")
-    ]
-
-    for col_name, col_type in columns_to_add:
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        print(f"Checking database schema for: {db_path}")
+        
+        # Add confidence_score column
         try:
-            print(f"Adding column '{col_name}' to 'cases' table...")
-            cursor.execute(f"ALTER TABLE cases ADD COLUMN {col_name} {col_type}")
-            print(f"[OK] Added {col_name}")
+            cursor.execute("ALTER TABLE cases ADD COLUMN confidence_score FLOAT")
+            print("✅ Added column: confidence_score")
         except sqlite3.OperationalError as e:
-            if "duplicate column name" in str(e):
-                print(f"[INFO] Column '{col_name}' already exists.")
+            if "duplicate column name" in str(e).lower():
+                pass # Already exists
             else:
-                print(f"[ERROR] Failed to add {col_name}: {e}")
+                print(f"⚠️ Column error: {e}")
 
-    conn.commit()
-    conn.close()
-    print("Migration complete!")
+        # Add auto_submit_reason column
+        try:
+            cursor.execute("ALTER TABLE cases ADD COLUMN auto_submit_reason VARCHAR(255)")
+            print("✅ Added column: auto_submit_reason")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" in str(e).lower():
+                pass # Already exists
+            else:
+                print(f"⚠️ Column error: {e}")
+                
+        conn.commit()
+        conn.close()
+        print("🚀 Database schema check complete!")
+        
+    except Exception as e:
+        print(f"❌ Error updating database: {e}")
 
 if __name__ == "__main__":
     migrate()
