@@ -138,7 +138,7 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
                     print(f"[pa_document_agent] Found raw EHR for patient {db_case.patient_id}")
                     ehr = raw_ehr.to_dict()
                 else:
-                    # 2. Last resort: Basic case model placeholders
+        # 2. Last resort: Basic case model placeholders
                     print(f"[pa_document_agent] No raw EHR found, using Case placeholders.")
                     ehr["patient_id"] = db_case.patient_id
                     ehr["patient_first_name"] = "Patient"
@@ -146,7 +146,25 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
                     ehr["date_of_birth"] = "N/A (Update in Records)"
                     ehr["insurance_company"] = "N/A"
     
-    ehr_text = _ehr_to_text(ehr)
+    # Bundle pre-summarized data
+    summarized_data_path = os.path.join(backend_dir, "uploads", "all_summarized_data.json")
+    summarized_evidence_text = ""
+    if os.path.exists(summarized_data_path):
+        try:
+            with open(summarized_data_path, 'r', encoding='utf-8') as f:
+                summarized_data = json.load(f)
+            if summarized_data and isinstance(summarized_data, list):
+                summarized_evidence_text = "\n\n### PRE-SUMMARIZED PATIENT PDF EVIDENCE:\n"
+                for summary_item in summarized_data:
+                    fname = summary_item.get("file", "Unknown File")
+                    summary = summary_item.get("summary", "No summary found.")
+                    if "error" in summary_item:
+                        continue
+                    summarized_evidence_text += f"\n--- {fname} ---\n{summary}\n"
+        except Exception as e:
+            print(f"[pa_document_agent] Failed to load summarized PDFs: {e}")
+
+    ehr_text = _ehr_to_text(ehr) + summarized_evidence_text
     
     log_event(
         case_id     = case_id,
@@ -156,44 +174,61 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
         duration_ms = int((time.time() - ehr_fetch_start) * 1000)
     )
 
-    # 2. Extract policy text (for checklist)
+    # 2. Extract policy details and pa rules
     pdf_start = time.time()
     log_event(
         case_id    = case_id,
         agent_name = "PA_DOCUMENT_AGENT",
-        event      = "PDF_EXTRACTION_STARTED",
+        event      = "POLICY_RULES_LOADING_STARTED",
         status     = "RUNNING"
     )
-    policy_text = ""
-    if os.path.exists(pdf_path):
+    rules_path = os.path.join(backend_dir, "policy-pdfs", "extracted_policy_rules.json")
+    pa_format = "{}"
+    policy_rules = "[]"
+    
+    if os.path.exists(rules_path):
         try:
-            policy_text = extract_raw_text(pdf_path)
-            log_event(
-                case_id     = case_id,
-                agent_name  = "PA_DOCUMENT_AGENT",
-                event       = "PDF_EXTRACTION_COMPLETED",
-                status      = "SUCCESS",
-                duration_ms = int((time.time() - pdf_start) * 1000)
-            )
+            with open(rules_path, 'r', encoding='utf-8') as f:
+                rules_data = json.load(f)
+            if rules_data and isinstance(rules_data, list):
+                target_data = rules_data[0].get("extracted_data", {})
+                for item in rules_data:
+                    if item.get("file") == os.path.basename(pdf_path) if pdf_path else False:
+                        target_data = item.get("extracted_data", {})
+                        break
+                
+                pa_format = json.dumps(target_data.get("pa_document_format", {}), indent=2)
+                bundled_rules = {
+                    "required_documents": target_data.get("required_documents", []),
+                    "eligibility_criteria": target_data.get("eligibility_criteria", [])
+                }
+                policy_rules = json.dumps(bundled_rules, indent=2)
+                
+                log_event(
+                    case_id     = case_id,
+                    agent_name  = "PA_DOCUMENT_AGENT",
+                    event       = "POLICY_RULES_LOADING_COMPLETED",
+                    status      = "SUCCESS",
+                    duration_ms = int((time.time() - pdf_start) * 1000)
+                )
         except Exception as e:
             log_event(
                 case_id    = case_id,
                 agent_name = "PA_DOCUMENT_AGENT",
-                event      = "PDF_EXTRACTION_FAILED",
+                event      = "POLICY_RULES_LOADING_FAILED",
                 status     = "FAILED",
                 message    = str(e)
             )
-            print(f"[pa_document_agent] PDF extraction failed: {e}")
-            policy_text = "Policy PDF could not be read."
+            print(f"[pa_document_agent] Policy rules loading failed: {e}")
+            policy_rules = "[]"
     else:
         log_event(
             case_id    = case_id,
             agent_name = "PA_DOCUMENT_AGENT",
-            event      = "PDF_EXTRACTION_FAILED",
+            event      = "POLICY_RULES_LOADING_FAILED",
             status     = "FAILED",
-            message    = "Policy PDF not found"
+            message    = "Policy rules JSON not found"
         )
-        policy_text = "Policy PDF not found."
 
     today = datetime.now().strftime("%B %d, %Y")
 
@@ -208,7 +243,7 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
     )
     cover_letter = _invoke(
         get_cover_letter_prompt(),
-        {"ehr_data": ehr_text, "date": today},
+        {"ehr_data": ehr_text, "date": today, "pa_format": pa_format},
     )
     log_event(
         case_id     = case_id,
@@ -229,7 +264,7 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
     )
     clinical_summary = _invoke(
         get_clinical_summary_prompt(),
-        {"ehr_data": ehr_text},
+        {"ehr_data": ehr_text, "pa_format": pa_format},
     )
     log_event(
         case_id     = case_id,
@@ -250,7 +285,7 @@ def generate_pa_content(case_id: str, pdf_path: str | None = None) -> dict:
     )
     raw_checklist = _invoke(
         get_checklist_prompt(),
-        {"ehr_data": ehr_text, "policy_text": policy_text[:4000]},
+        {"ehr_data": ehr_text, "policy_rules": policy_rules},
     )
     log_event(
         case_id     = case_id,

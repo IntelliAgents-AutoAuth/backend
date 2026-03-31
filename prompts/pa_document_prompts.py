@@ -19,7 +19,10 @@ IMPORTANT:
 - Be specific — reference actual values from the EHR (LVEF %, BNP levels, diagnosis, etc.)
 - Do NOT invent data that is not in the EHR
 
-EHR DATA:
+Take into account these specific POLICY FORMATTING RULES:
+{pa_format}
+
+EHR DATA & SUMMARIZED EVIDENCE:
 {ehr_data}
 
 Return ONLY the letter text. No preamble, no markdown. Start with "Dear Prior Authorization Review Team,"
@@ -39,7 +42,10 @@ IMPORTANT:
 - Use clear medical terminology
 - Keep it under 400 words
 
-EHR DATA:
+Take into account these specific POLICY FORMATTING RULES:
+{pa_format}
+
+EHR DATA & SUMMARIZED EVIDENCE:
 {ehr_data}
 
 Return ONLY the clinical summary text. Use clear section headers.
@@ -47,17 +53,17 @@ Return ONLY the clinical summary text. Use clear section headers.
 
 CHECKLIST_PROMPT = """You are a prior authorization compliance specialist.
 
-Based on the policy requirements (from the PDF) and the patient's EHR data, generate a CHECKLIST of every item the insurance company requires for this authorization.
+Based on the policy requirements and the patient's EHR data, generate a CHECKLIST of every item the insurance company requires for this authorization.
 
 For each item:
 - State the requirement clearly
 - State whether it is MET or MISSING based on the EHR data
 - Provide the specific evidence/value from the EHR that satisfies it (or explain what is missing)
 
-POLICY REQUIREMENTS (from PDF):
-{policy_text}
+POLICY RULES & REQUIREMENTS:
+{policy_rules}
 
-PATIENT EHR DATA:
+PATIENT EHR DATA & SUMMARIZED EVIDENCE:
 {ehr_data}
 
 Return a JSON array like this (ONLY the JSON, no other text):

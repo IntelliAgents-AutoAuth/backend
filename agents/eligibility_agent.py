@@ -53,14 +53,14 @@ def get_eligibility_chain(api_key=None):
 
 def _parse_verdict(raw_output: str) -> dict:
     """
-    Parse the strict VERDICT / REASON output format from the LLM.
+    Parse the strict REASONING / VERDICT output format from the LLM.
     Falls back gracefully if the format is not exactly followed.
     """
     verdict = "NOT_ELIGIBLE"   # safe default
     reason = raw_output.strip()
 
     verdict_match = re.search(r"VERDICT\s*:\s*(ELIGIBLE|NOT_ELIGIBLE)", raw_output, re.IGNORECASE)
-    reason_match  = re.search(r"REASON\s*:\s*(.+)", raw_output, re.IGNORECASE | re.DOTALL)
+    reason_match  = re.search(r"(?:REASONING|REASON)\s*:\s*(.*?)(?=\s*VERDICT\s*:|$)", raw_output, re.IGNORECASE | re.DOTALL)
 
     if verdict_match:
         verdict = verdict_match.group(1).upper()
@@ -117,36 +117,51 @@ def run_eligibility_check(props: dict) -> dict:
     )
 
     # ── 1. PRE-EXTRACT DATA ──────────────────
-    policy_text = "ERROR: Failed to extract policy."
+    eligibility_criteria_list = "ERROR: Failed to load eligibility criteria."
     ehr_data = "ERROR: Failed to fetch EHR data."
 
     try:
-        from tools.pdf_extractor import extract_raw_text
+        rules_path = os.path.join(backend_dir, "policy-pdfs", "extracted_policy_rules.json")
         pdf_start = time.time()
         log_event(
             case_id    = case_id,
             agent_name = "ELIGIBILITY_AGENT",
-            event      = "PDF_EXTRACTION_STARTED",
+            event      = "POLICY_RULES_LOADING_STARTED",
             status     = "RUNNING"
         )
-        policy_text = extract_raw_text(pdf_path)
+        with open(rules_path, 'r', encoding='utf-8') as f:
+            rules_data = json.load(f)
+            
+        if isinstance(rules_data, list) and len(rules_data) > 0:
+            target_data = rules_data[0].get("extracted_data", {})
+            for item in rules_data:
+                if item.get("file") == os.path.basename(pdf_path):
+                    target_data = item.get("extracted_data", {})
+                    break
+            
+            crit_docs = target_data.get("eligibility_criteria", [])
+            eligibility_criteria_list = json.dumps(crit_docs, indent=2)
+        else:
+            eligibility_criteria_list = "[]"
+            
         log_event(
             case_id     = case_id,
             agent_name  = "ELIGIBILITY_AGENT",
-            event       = "PDF_EXTRACTION_COMPLETED",
+            event       = "POLICY_RULES_LOADING_COMPLETED",
             status      = "SUCCESS",
-            message     = f"Extracted {len(policy_text)} chars",
+            message     = f"Loaded eligibility criteria successfully",
             duration_ms = int((time.time() - pdf_start) * 1000)
         )
+        print(f"[eligibility_agent] Eligibility criteria loaded successfully from extracted rules.")
     except Exception as e:
         log_event(
             case_id    = case_id,
             agent_name = "ELIGIBILITY_AGENT",
-            event      = "PDF_EXTRACTION_FAILED",
+            event      = "POLICY_RULES_LOADING_FAILED",
             status     = "FAILED",
             message    = str(e)
         )
-        print(f"[eligibility_agent] PDF Extraction failed: {e}")
+        print(f"[eligibility_agent] Policy Rules Loading failed: {e}")
 
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
@@ -169,14 +184,42 @@ def run_eligibility_check(props: dict) -> dict:
                 for i, up in enumerate(uploads, 1):
                     name = up.get("document_name") or up.get("file_path", "Unknown File")
                     text = up.get("extracted_text", "No text extracted.")
-                    uploaded_evidence += f"\n--- DOCUMENT {i}: {name} ---\n{text}\n"
+                    uploaded_evidence += f"\n--- DATABASE RECORD: {name} ---\n{text}\n"
+
+        # ── 1.2 READ LOCAL PDF UPLOADS ───────────
+        upload_dir = os.path.join(backend_dir, "uploads", str(case_id))
+        if os.path.exists(upload_dir) and os.path.isdir(upload_dir):
+            try:
+                from pypdf import PdfReader
+                pdf_files = [f for f in os.listdir(upload_dir) if f.lower().endswith('.pdf')]
+                if pdf_files:
+                    if not uploaded_evidence.strip():
+                        uploaded_evidence = "\n### NEWLY_UPLOADED_EVIDENCE:\n"
+                    for pdf_file in pdf_files:
+                        pdf_path_full = os.path.join(upload_dir, pdf_file)
+                        try:
+                            reader = PdfReader(pdf_path_full)
+                            text = ""
+                            for page in reader.pages:
+                                extracted = page.extract_text()
+                                if extracted:
+                                    text += extracted + "\n"
+                            if text.strip():
+                                uploaded_evidence += f"\n--- LOCAL UPLOAD: {pdf_file} ---\n{text}\n"
+                                print(f"[eligibility_agent] Local PDF read successfully: {pdf_file}")
+                        except Exception as inner_e:
+                            print(f"[eligibility_agent] Failed to parse local PDF {pdf_file}: {inner_e}")
+            except ImportError:
+                print(f"[eligibility_agent] pypdf not installed, skipping local PDF reads.")
+            except Exception as e:
+                print(f"[eligibility_agent] Error reading uploads folder: {e}")
 
         log_event(
             case_id     = case_id,
             agent_name  = "ELIGIBILITY_AGENT",
             event       = "EHR_FETCH_COMPLETED",
             status      = "SUCCESS",
-            message     = f"EHR data fetched. Evidence uploads: {len(raw_ehr.get('user_uploaded_files', [])) if raw_ehr else 0}",
+            message     = f"EHR data and {len(uploaded_evidence)} bytes of evidence fetched.",
             duration_ms = int((time.time() - ehr_start) * 1000)
         )
     except Exception as e:
@@ -206,15 +249,16 @@ def run_eligibility_check(props: dict) -> dict:
         "input": f"""
 Perform a final Policy Eligibility Check for {case_id}.
 
-### POLICY_TEXT:
-{policy_text}
+### ELIGIBILITY_CRITERIA:
+{eligibility_criteria_list}
 
 ### PATIENT_EHR:
 {ehr_data}
 {uploaded_evidence}
 
 INSTRUCTIONS:
-- Compare the PATIENT_EHR and NEWLY_UPLOADED_EVIDENCE against the POLICY_TEXT requirements.
+- Compare the PATIENT_EHR and NEWLY_UPLOADED_EVIDENCE against the ELIGIBILITY_CRITERIA rules.
+
 - Determine if the case is ELIGIBLE or NOT_ELIGIBLE.
 - Return a VERDICT and REASON following the strict sequence.
 """

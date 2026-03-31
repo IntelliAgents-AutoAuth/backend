@@ -30,7 +30,7 @@ router = APIRouter(prefix="/cases", tags=["cases"])
 def merge_ehr_data_into_case(db: Session, db_case: Case):
     """Augment the case object with data from aggregated sources for cleaner frontend display."""
     # Use the smart fetcher that combines EHR table, manual entries, and PDF extractions
-    ext_data = fetch_extracted_data_by_case(db_case.case_id)
+    ext_data = fetch_extracted_data_by_case(db_case.case_id, extract_pdf_text=False)
     if not ext_data:
         return db_case
     

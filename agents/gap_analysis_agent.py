@@ -121,37 +121,52 @@ async def run_gap_analysis(props: dict) -> dict:
     )
 
     # ── 1. PRE-EXTRACT DATA ──────────────────
-    policy_text = "ERROR: Failed to extract policy."
+    required_docs_list = "ERROR: Failed to load required documents."
     ehr_data = "ERROR: Failed to fetch EHR data."
 
     try:
-        from tools.pdf_extractor import extract_raw_text
+        rules_path = os.path.join(backend_dir, "policy-pdfs", "extracted_policy_rules.json")
         pdf_start = time.time()
         log_event(
             case_id    = case_id,
             agent_name = "GAP_ANALYSIS_AGENT",
-            event      = "PDF_EXTRACTION_STARTED",
+            event      = "POLICY_RULES_LOADING_STARTED",
             status     = "RUNNING"
         )
-        policy_text = extract_raw_text(pdf_path)
+        
+        with open(rules_path, 'r', encoding='utf-8') as f:
+            rules_data = json.load(f)
+            
+        if isinstance(rules_data, list) and len(rules_data) > 0:
+            target_data = rules_data[0].get("extracted_data", {})
+            for item in rules_data:
+                if item.get("file") == os.path.basename(pdf_path):
+                    target_data = item.get("extracted_data", {})
+                    break
+            
+            req_docs = target_data.get("required_documents", [])
+            required_docs_list = json.dumps(req_docs, indent=2)
+        else:
+            required_docs_list = "[]"
+            
         log_event(
             case_id     = case_id,
             agent_name  = "GAP_ANALYSIS_AGENT",
-            event       = "PDF_EXTRACTION_COMPLETED",
+            event       = "POLICY_RULES_LOADING_COMPLETED",
             status      = "SUCCESS",
-            message     = f"Extracted {len(policy_text)} chars",
+            message     = f"Loaded required documents list successfully",
             duration_ms = int((time.time() - pdf_start) * 1000)
         )
-        print(f"[gap_analysis_agent] PDF extracted successfully from {pdf_path} ({len(policy_text)} chars)")
+        print(f"[gap_analysis_agent] Required docs list loaded successfully from extracted rules.")
     except Exception as e:
         log_event(
             case_id    = case_id,
             agent_name = "GAP_ANALYSIS_AGENT",
-            event      = "PDF_EXTRACTION_FAILED",
+            event      = "POLICY_RULES_LOADING_FAILED",
             status     = "FAILED",
             message    = str(e)
         )
-        print(f"[gap_analysis_agent] PDF Extraction failed: {e}")
+        print(f"[gap_analysis_agent] Policy Rules Loading failed: {e}")
 
     try:
         from tools.ehr_fetcher import fetch_extracted_data_by_case
@@ -218,15 +233,15 @@ async def run_gap_analysis(props: dict) -> dict:
         "input": f"""
 Perform a Gap Analysis for {case_id}.
 
-### POLICY_TEXT:
-{policy_text}
+### REQUIRED_DOCUMENTS_LIST:
+{required_docs_list}
 
 ### PATIENT_EHR:
 {ehr_data}
 {uploaded_evidence}
 
 INSTRUCTIONS:
-- Review the POLICY_TEXT for requirements.
+- Review the REQUIRED_DOCUMENTS_LIST for requirements.
 - Review the PATIENT_EHR and NEWLY_UPLOADED_EVIDENCE for evidence.
 - Return the structured Gap Analysis JSON.
 """
