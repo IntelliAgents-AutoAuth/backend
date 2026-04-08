@@ -119,22 +119,47 @@ async def generate_pa_content(case_id: str, payer_name: str | None = None, cpt_c
     ehr_text = _ehr_to_text(ehr)
 
     # 3. TRIPLE-STREAM PARALLEL GENERATION
-    logger.info("[pa_document_agent] Launching Parallel Triple-Stream Generation...")
+    logger.info("[pa_document_agent] Launching Parallel Triple-Stream Generation with Multi-Key Sharding...")
     
-    # Use different keys for parallel streams if available to avoid rate limits
-    llm = _get_llm()
+    # OPTIMIZATION: Key Sharding — use different keys for different streams to avoid rate limits
+    keys = get_keys() # Helper from utils.llm_util that loads all keys from .env
+    
+    # We have 3 tasks. Assign a unique key to each if available.
+    key_cl = keys[0]
+    key_cs = keys[1] if len(keys) > 1 else keys[0]
+    key_ch = keys[2] if len(keys) > 2 else (keys[1] if len(keys) > 1 else keys[0])
+    
+    logger.info(f"[pa_document_agent] Using {len(keys)} unique keys for sharding. Tasks assigned to keys index: 0, 1, 2")
+    
+    primary_model = get_model_order("pa_document")[0]
+    
+    llm_cl = _get_llm(api_key=key_cl, model_name=primary_model)
+    llm_cs = _get_llm(api_key=key_cs, model_name=primary_model)
+    
+    # OPTIMIZATION: Native JSON mode for checklist stream (removes parsing lag)
+    # Using .bind() as response_format might not be supported in __init__ for this version
+    llm_ch = ChatGoogleGenerativeAI(
+        model=primary_model,
+        temperature=0.1,
+        google_api_key=key_ch
+    ).bind(response_format={"type": "json_object"})
     
     cl_prompt = get_cover_letter_prompt().format_messages(ehr_data=ehr_text, date=today, pa_format=pa_format)
     cs_prompt = get_clinical_summary_prompt().format_messages(ehr_data=ehr_text, pa_format=pa_format)
     ch_prompt = get_checklist_prompt().format_messages(ehr_data=ehr_text, policy_rules=policy_rules)
 
+    logger.info(f"[pa_document_agent] Concurrent LLM calls starting...")
+    task_start = time.time()
+    
     # Invoke all three LLM tasks concurrently
     llm_results = await asyncio.gather(
-        llm.ainvoke(cl_prompt),
-        llm.ainvoke(cs_prompt),
-        llm.ainvoke(ch_prompt),
+        llm_cl.ainvoke(cl_prompt),
+        llm_cs.ainvoke(cs_prompt),
+        llm_ch.ainvoke(ch_prompt),
         return_exceptions=True
     )
+    
+    logger.info(f"[pa_document_agent] Concurrent LLM calls finished in {time.time() - task_start:.2f}s")
 
     # Process Results
     cl_res = llm_results[0]
@@ -143,16 +168,30 @@ async def generate_pa_content(case_id: str, payer_name: str | None = None, cpt_c
 
     cover_letter = cl_res.content if not isinstance(cl_res, Exception) else f"Error: {str(cl_res)}"
     clinical_summary = cs_res.content if not isinstance(cs_res, Exception) else f"Error: {str(cs_res)}"
-    checklist_raw = ch_res.content if not isinstance(ch_res, Exception) else "[]"
+    checklist_raw = ch_res.content if not isinstance(ch_res, Exception) else "{}" # response_format returns JSON
+
 
     # Parse checklist JSON
     checklist = []
     try:
+        # Optimization: checklist_raw might already be clean JSON due to json_object mode
         clean_ch = re.sub(r"```(?:json)?|```", "", checklist_raw).strip()
-        checklist = json.loads(clean_ch)
+        data = json.loads(clean_ch)
+        
+        # Handle cases where LLM wraps the array in an object (preferred in json_mode)
+        if isinstance(data, dict):
+            # Check for common keys like "checklist", "items", etc.
+            checklist = data.get("checklist") or data.get("items") or list(data.values())[0]
+        else:
+            checklist = data
+            
+        if not isinstance(checklist, list):
+            checklist = [checklist] if checklist else []
+            
     except Exception as e:
         logger.error(f"[pa_document_agent] Checklist parse failed: {e}")
         checklist = [{"item": "Clinical Document Review", "met": True, "evidence": "Verified in clinical summary"}]
+
 
     duration_ms = int((time.time() - agent_start) * 1000)
     log_event(

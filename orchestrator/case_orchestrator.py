@@ -204,35 +204,23 @@ class CaseOrchestrator:
             self._current_trigger = trigger
 
             # AI Thinking & Step resolution
-            # Optimization: For deterministic triggers, skip expensive LLM call
+            # Optimization: Use deterministic path for common triggers to bypass Supervisor latency (~10s per call)
             DETERMINISTIC_TRIGGERS = {
                 "CASE_CREATED",
                 "SYNC_REQUESTED",
+                "DOCUMENTS_UPLOADED", # Speed up document processing
                 "ELIGIBILITY_REQUESTED",
                 "GENERATE_PACKET_REQUESTED",
+                "STAFF_APPROVED"
             }
             
-            # Special case: DOCUMENTS_UPLOADED during in-progress should use LLM (more intelligent)
-            # This prevents hardcoded routing from breaking in edge cases
-            use_llm_for_document_upload = (
-                trigger == "DOCUMENTS_UPLOADED" and 
-                db_case.status in {
-                    CaseStatus.ELIGIBILITY_RUNNING.value,
-                    CaseStatus.PACKET_GENERATING.value,
-                }
-            )
-            
-            if trigger in DETERMINISTIC_TRIGGERS and not use_llm_for_document_upload:
-                # Skip LLM Supervisor - we already know the next step for these triggers
-                logger.info(f"[orchestrator] Using deterministic path for trigger={trigger} (skipping LLM Supervisor)")
+            # We skip LLM Supervisor for these to achieve sub-20s latency
+            if trigger in DETERMINISTIC_TRIGGERS:
+                logger.info(f"[orchestrator] Using deterministic path for trigger={trigger} (skipping Supervisor logic for speed)")
                 current_step = self._resolve_next_step(trigger, db_case.status)
-                thinking = f"Deterministic route (no LLM needed) for trigger={trigger}"
+                thinking = f"Fast-path deterministic route for trigger={trigger}"
             else:
-                # For ambiguous triggers OR document uploads during in-progress, use LLM to decide
-                if use_llm_for_document_upload:
-                    logger.info(f"[orchestrator] Using LLM Supervisor for DOCUMENTS_UPLOADED (case in-progress)")
-                else:
-                    logger.info(f"[orchestrator] Using LLM Supervisor for ambiguous trigger={trigger}")
+                logger.info(f"[orchestrator] Using LLM Supervisor for ambiguous trigger={trigger}")
                 decision = await self._resolve_next_step_llm(db, db_case, trigger, payload)
                 current_step = decision.get("next_step")
                 thinking = decision.get("thinking", "No explanation provided.")
@@ -287,15 +275,20 @@ class CaseOrchestrator:
                     break
 
                 # Refresh DB state to ensure we have the absolute latest audit_log
-                # (in case the agent used its own session internally)
                 db.refresh(db_case)
 
+                # ADVANCE: Use deterministic map for internal transitions (Gap -> Eligibility -> etc.)
                 current_step = self._resolve_next_step(event, db_case.status)
+                
+                # BUG FIX: Anchor the COMPLETED log by committing before continuing
+                db.commit()
 
             logger.info(
                 f"[orchestrator] Flow complete for {self.case_id}. "
                 f"History: {self.memory.summary()}"
             )
+            # Ensure final logs are saved to DB
+            db.commit()
 
         except Exception as e:
             logger.exception(f"[orchestrator] Unhandled error: {e}")

@@ -4,9 +4,9 @@ from typing import List
 # Central model routing policy (task -> model order)
 # First entry is primary model, later entries are fallbacks.
 TASK_MODEL_FALLBACKS: dict[str, list[str]] = {
-    "orchestrator_supervisor": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
+    "orchestrator_supervisor": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
     "eligibility": ["gemini-2.5-flash"],
-    "gap_analysis": ["gemini-2.5-flash"],
+    "gap_analysis": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
     "summarization": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
     "pa_document": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
     "policy_extraction": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
